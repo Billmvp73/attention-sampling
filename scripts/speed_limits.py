@@ -23,6 +23,7 @@ import sys
 import zipfile
 
 from cv2 import imread, imwrite
+import keras.backend as K
 from keras.callbacks import Callback, ModelCheckpoint, LearningRateScheduler
 from keras.layers import Activation, BatchNormalization, Conv2D, \
     GlobalAveragePooling2D, MaxPooling2D, Dense, Input, add
@@ -38,6 +39,20 @@ from ats.utils.layers import L2Normalize, ResizeImages, SampleSoftmax, \
 from ats.utils.regularizers import multinomial_entropy
 from ats.utils.training import Batcher
 
+from tensorflow.compat.v1 import ConfigProto
+from tensorflow.compat.v1 import InteractiveSession
+
+from tensorflow import ConfigProto
+from tensorflow import InteractiveSession
+from tensorflow.python import debug as tf_debug
+from keras.callbacks import TensorBoard
+
+config = ConfigProto()
+config.gpu_options.allow_growth = True
+session = InteractiveSession(config=config)
+sess = K.get_session()
+sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+K.set_session(sess)
 
 def check_file(filepath, md5sum):
     """Check a file against an md5 hash value.
@@ -570,6 +585,20 @@ def main(argv):
         help="How many epochs to train for"
     )
 
+    parser.add_argument(
+        "--resume",
+        type=bool,
+        default=False,
+        help="Load pre-trained model"
+    )
+
+    parser.add_argument(
+        "--load_epoch",
+        type=int,
+        default=0,
+        help="Load pre-trained model at epoch number"
+    )
+
     args = parser.parse_args(argv)
 
     # Load the data
@@ -603,7 +632,8 @@ def main(argv):
             path.join(args.output, "weights.{epoch:02d}.h5"),
             save_weights_only=True
         ),
-        LearningRateScheduler(get_lr_schedule(args))
+        LearningRateScheduler(get_lr_schedule(args)),
+        TensorBoard(log_dir=args.output+"/logs", histogram_freq=0, batch_size=args.batch_size, write_grads=True, write_images=True)
     ]
     model.fit_generator(
         training_batched,
