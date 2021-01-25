@@ -4,3 +4,4 @@
 #
 
 from .ats_layer import SamplePatches, Expectation, attention_sampling
+from .sampling import sample

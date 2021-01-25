@@ -21,6 +21,7 @@ from keras.utils import Sequence, plot_model
 import numpy as np
 
 from ats.core import attention_sampling
+from ats.core import sample, SamplePatches
 from ats.utils.layers import L2Normalize, ResizeImages, SampleSoftmax, \
     ImageLinearTransform, ImagePan, ActivityRegularizer
 from ats.utils.regularizers import multinomial_entropy
@@ -37,7 +38,9 @@ import tensorflow as tf
 from speed_utils import STS, Sign, SpeedLimits
 
 import matplotlib.pyplot as plt
+from timer import Timer
 
+#config = ConfigProto(device_count = {'GPU': 0})
 config = ConfigProto()
 config.gpu_options.allow_growth = True
 session = InteractiveSession(config=config)
@@ -227,7 +230,7 @@ def main(argv):
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=32,
+        default=1,
         help="Choose the batch size for SGD"
     )
     parser.add_argument(
@@ -278,16 +281,22 @@ def main(argv):
         args.patch_size,
         args.regularizer_strength
     )
-    model.compile(
-        loss="categorical_crossentropy",
-        optimizer=get_optimizer(args),
-        metrics=["accuracy", "categorical_crossentropy"]
-    )
+    
     if args.resume:
         load_path = os.path.join(args.load_dir, "weights."+ str(args.load_epoch) + ".h5")
         model.load_weights(load_path)
         model.trainable = False
+        model.compile(
+        loss="categorical_crossentropy",
+        optimizer=get_optimizer(args),
+        metrics=["accuracy", "categorical_crossentropy"]
+        )
     else:
+        model.compile(
+        loss="categorical_crossentropy",
+        optimizer=get_optimizer(args),
+        metrics=["accuracy", "categorical_crossentropy"]
+        )
         plot_model(model, to_file=path.join(args.output, "model.png"))
 
         callbacks = [
@@ -314,30 +323,42 @@ def main(argv):
     #     optimizer=get_optimizer(args),
     #     metrics=["accuracy", "categorical_crossentropy"]
     # )
+    #x_high = model.layers[2].output
+    #x_low = model.layers[3].output
+    #attention_map = model.layers[10].output
     intermediate_sample = model.layers[11].output
     intermediate_attention_map = model.layers[10].output
-    model_b = Model(model.input, [intermediate_sample[0], intermediate_sample[1], intermediate_attention_map])
+    #model_b = Model(model.input, [x_low, x_high, attention_map])
+    model_b = Model(model.input, [intermediate_sample[0], intermediate_sample[1], intermediate_sample[2], intermediate_attention_map])
     if not os.path.exists("test_patch"):
         os.mkdir("test_patch")
     for inputs, targets in test_batched:
         #with tf.GradientTape() as tape:
         #Forward pass.
-
-        patches, sampled_attention, attention_map = model_b.predict(inputs)
-        for b in range(patches.shape[0]):
-            imgs = patches[b]
-            fig, axs = plt.subplots(2)
-            axs[0].imshow(inputs[b])
-            axs[1].imshow(attention_map[b])
-            plt.savefig("test_patch/input%d.png" % b)
-            plt.clf()
-            for i in range(imgs.shape[0]):
-                patch = imgs[i]
-                plt.imshow(patch)
-                plt.savefig("test_patch/b%d_patch_%d.png" % (b, i))
-                plt.clf()    
-        attention_regularizer = multinomial_entropy(args.regularizer_strength)
-        attention_map = ActivityRegularizer(attention_regularizer)(attention_map)
+        timer_batch = Timer(desc="time per batch")
+        timer_batch.start_time()
+        patches, sampled_attention, offsets, attention_map = model_b.predict(inputs)
+        # low, high, ats_map = model_b.predict(inputs)
+        # sample_space = K.shape(ats_map)[1:]
+        # samples, sampled_attention = sample(args.n_patches, ats_map, sample_space, receptive_field=9, replace=False)
+        timer_batch.end_time()
+        # for b in range(patches.shape[0]):
+        #     imgs = patches[b]
+        #     fig, axs = plt.subplots(2)
+        #     axs[0].imshow(inputs[b])
+        #     axs[0].axis('off')
+        #     axs[1].imshow(attention_map[b])
+        #     axs[1].axis('off')
+        #     plt.savefig("test_patch/input%d.png" % b)
+        #     plt.clf()
+        #     for i in range(imgs.shape[0]):
+        #         patch = imgs[i]
+        #         plt.imshow(patch)
+        #         plt.axis('off')
+        #         plt.savefig("test_patch/b%d_patch_%d.png" % (b, i))
+        #         plt.clf()    
+        # attention_regularizer = multinomial_entropy(args.regularizer_strength)
+        # attention_map = ActivityRegularizer(attention_regularizer)(attention_map)
 
 
 
