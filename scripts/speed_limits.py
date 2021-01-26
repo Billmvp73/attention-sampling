@@ -74,7 +74,7 @@ class AttentionSaver(Callback):
             fmt="%d"
         )
         self.period = period
-        self.epoch_since_last_epoch = 0
+        self.epoch_since_last_save = 0
 
     def on_train_begin(self, *args):
         _, _, x_low = self._att_model.predict(self._X)
@@ -82,9 +82,9 @@ class AttentionSaver(Callback):
             self._imsave(path.join(self._dir, "{}.jpg").format(i), xi)
 
     def on_epoch_end(self, e, logs):
-        self.epoch_since_last_epoch += 1
-        if self.epochs_since_last_save >= self.period:
-            self.epochs_since_last_save = 0
+        self.epoch_since_last_save += 1
+        if self.epoch_since_last_save >= self.period:
+            self.epoch_since_last_save = 0
             att, patches, _ = self._att_model.predict(self._X)
             for i, att_i in enumerate(att):
                 np.save(path.join(self._dir, "att_{}_{}.npy").format(e, i), att_i)
@@ -351,14 +351,23 @@ def main(argv):
         LearningRateScheduler(get_lr_schedule(args)),
         TensorBoard(log_dir=args.output+"/logs", histogram_freq=0, batch_size=args.batch_size, write_grads=True, write_images=True)
     ]
-    model.fit_generator(
-        training_batched,
-        validation_data=test_batched,
-        epochs=args.epochs,
-        class_weight=class_weights,
-        callbacks=callbacks
-    )
-
+    if args.resume:
+        model.fit_generator(
+            training_batched,
+            validation_data=test_batched,
+            epochs=args.epochs,
+            class_weight=class_weights,
+            callbacks=callbacks,
+            initial_epoch = int(args.load_epoch)
+        )
+    else:
+        model.fit_generator(
+            training_batched,
+            validation_data=test_batched,
+            epochs=args.epochs,
+            class_weight=class_weights,
+            callbacks=callbacks
+        )
 
 if __name__ == "__main__":
     main(None)

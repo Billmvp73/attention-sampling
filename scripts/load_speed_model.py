@@ -40,9 +40,9 @@ from speed_utils import STS, Sign, SpeedLimits
 import matplotlib.pyplot as plt
 from timer import Timer
 
-#config = ConfigProto(device_count = {'GPU': 0})
-config = ConfigProto()
-config.gpu_options.allow_growth = True
+config = ConfigProto(device_count = {'GPU': 0})
+# config = ConfigProto()
+# config.gpu_options.allow_growth = True
 session = InteractiveSession(config=config)
 sess = K.get_session()
 sess = tf_debug.LocalCLIDebugWrapperSession(sess)
@@ -230,7 +230,7 @@ def main(argv):
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=1,
+        default=32,
         help="Choose the batch size for SGD"
     )
     parser.add_argument(
@@ -326,10 +326,11 @@ def main(argv):
     #x_high = model.layers[2].output
     #x_low = model.layers[3].output
     #attention_map = model.layers[10].output
+    intermediate_low = model.layers[3].output
     intermediate_sample = model.layers[11].output
     intermediate_attention_map = model.layers[10].output
     #model_b = Model(model.input, [x_low, x_high, attention_map])
-    model_b = Model(model.input, [intermediate_sample[0], intermediate_sample[1], intermediate_sample[2], intermediate_attention_map])
+    model_b = Model(model.input, [intermediate_low, intermediate_sample[0], intermediate_sample[1], intermediate_sample[2], intermediate_attention_map])
     if not os.path.exists("test_patch"):
         os.mkdir("test_patch")
     for inputs, targets in test_batched:
@@ -337,15 +338,18 @@ def main(argv):
         #Forward pass.
         timer_batch = Timer(desc="time per batch")
         timer_batch.start_time()
-        patches, sampled_attention, offsets, attention_map = model_b.predict(inputs)
+        low, patches, sampled_attention, samples, attention_map = model_b.predict(inputs)
+        #model.evaluate()
+        #loss = model.test_on_batch(inputs, targets)
         # low, high, ats_map = model_b.predict(inputs)
         # sample_space = K.shape(ats_map)[1:]
         # samples, sampled_attention = sample(args.n_patches, ats_map, sample_space, receptive_field=9, replace=False)
         timer_batch.end_time()
         # for b in range(patches.shape[0]):
         #     imgs = patches[b]
+        #     sample = samples[b]
         #     fig, axs = plt.subplots(2)
-        #     axs[0].imshow(inputs[b])
+        #     axs[0].imshow(low[b])
         #     axs[0].axis('off')
         #     axs[1].imshow(attention_map[b])
         #     axs[1].axis('off')
@@ -353,10 +357,13 @@ def main(argv):
         #     plt.clf()
         #     for i in range(imgs.shape[0]):
         #         patch = imgs[i]
+        #         sample_i = sample[i]
+        #         print("img %d sample %d location: "%(b, i), sample_i)
         #         plt.imshow(patch)
         #         plt.axis('off')
         #         plt.savefig("test_patch/b%d_patch_%d.png" % (b, i))
-        #         plt.clf()    
+        #         plt.clf()
+        break    
         # attention_regularizer = multinomial_entropy(args.regularizer_strength)
         # attention_map = ActivityRegularizer(attention_regularizer)(attention_map)
 
