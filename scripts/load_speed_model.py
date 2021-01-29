@@ -215,7 +215,7 @@ def main(argv):
         help="Choose the size of the patch to extract from the high resolution"
     )
     parser.add_argument(
-        "--n_patches",
+        "--               ",
         type=int,
         default=5,
         help="How many patches to sample"
