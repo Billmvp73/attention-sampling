@@ -9,6 +9,7 @@ import string
 import sys
 import zipfile
 import json
+import subprocess
 from cv2 import imread, imwrite, VideoCapture
 import cv2
 import keras.backend as K
@@ -178,16 +179,19 @@ class RoadText1k:
     )
     def __init__(self, directory, split="train", seed=0):
         self._directory = directory
-        self._set = sets[split][seed%len(sets[split])]
+        self._set = self.sets[split][seed%len(self.sets[split])]
+        self._split  = split
         self._data = self._load_signs(self._directory +"/"+"Ground_truths/Localisation", self._set)
-    
+
     def _load_signs(self, directory, inner):
         with open(os.path.join(directory, "{}_videos_results.json".format(inner))) as f:
             annotations = json.load(f)
         all_signs = []
         images = []
         for anno in annotations:
-            num = anno["name"].split("/")[1][:-4]
+            video_num = anno["name"].split("/")[1].split('-')[0]
+            num = os.path.join(self._directory + "/Videos/"+ self._split+'/'+ str(inner)+"/video_{}".format(video_num), anno["name"].split("/")[1])
+            images.append(num)
             labels = anno["labels"]
             signs = []
             if labels is not None:
@@ -202,7 +206,7 @@ class RoadText1k:
     def __getitem__(self, i):
         return self._data[i]
     
-def trafficSignDataSet(Sequence):
+class trafficSignDataSet(Sequence):
     """Provide a Keras Sequence for the RoadText-1K dataset.
 
     Arguments
@@ -212,7 +216,7 @@ def trafficSignDataSet(Sequence):
         train: bool, Select the training or testing sets
         seed: int, The prng seed for the dataset
     """
-    CATERORIES = [{'category': 'Illegible', 'attributes': {'English_Legible': [0, 'English_Text'], 'Illegible': False, 'Non_English_Legible': False}}, {'category': 'English_Legible', 'attributes': {'English_Legible': [0, 'English_Text'], 'Illegible': False, 'Non_English_Legible': False}}, {'category': 'English_Legible', 'attributes': {'English_Legible': [1, 'Licence_Plates'], 'Illegible': False, 'Non_English_Legible': False}}, {'category': 'Non_English_Legible', 'attributes': {'English_Legible': [0, 'English_Text'], 'Illegible': False, 'Non_English_Legible': False}}, {'category': 'Illegible', 'attributes': {'English_Legible': [1, 'Licence_Plates'], 'Illegible': False, 'Non_English_Legible': False}}, {'category': 'Non_English_Legible', 'attributes': {'English_Legible': [1, 'Licence_Plates'], 'Illegible': False, 'Non_English_Legible': False}}]
+    CATERORIES = ["English_Text", "Licence_Plates"]
 
     CLASSES = ["EMPTY", *CATERORIES]
 
@@ -227,26 +231,131 @@ def trafficSignDataSet(Sequence):
                 if not signs:
                     filtered.append((image, 0))
                 else:
-                    filtered.append((image, self.CLASSES.index(signs[0].label)))
+                    filtered.append((image, self.CLASSES.index(signs[0].name["English_Legible"][1])))
         return filtered
     
     def _acceptable(self, signs):
         if not signs:
             return signs, True
         
-        signs = [s for s in signs if s ]
+        f_signs = [s for s in signs if s.name["English_Legible"][1] in self.CATERORIES]
+
+         # No speed limit but many other signs
+        if not f_signs:
+            return None, False
+
+        # Not visible sign so skip
+        # if signs[0].visibility == "Illegible":
+        #     return None, False
+
+        return f_signs, True
+
+    def __len__(self):
+        return len(self._data)
+
+    def __getitem__(self, i):
+        image, category = self._data[i]
+        if not os.path.exists(image):
+            dir_path = image[:image.rfind("/")]
+            if not os.path.exists(dir_path):
+                os.mkdir(dir_path)
+            video_num = image[image.rfind("/")+1:].split("-")[0] + '.mp4'
+            frame = image[image.rfind("/")+1:].split("-")[0] +"-%7d.jpg"
+            ffmpeg_args = [
+                "ffmpeg",
+                "-i", 
+                os.path.join(dir_path[:dir_path.rfind("/")] , video_num),
+                "-r",
+                "30",
+                os.path.join(dir_path, frame)
+            ]
+
+            popenObj = subprocess.Popen(
+                args = ffmpeg_args
+            )
+            popenObj.wait()
+
+        data = imread(image)
+        data = data.astype(np.float32) / np.float32(255.)
+        label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
+        return data, label
+
+    @property
+    def image_size(self):
+        return self[0][0].shape[:2]
+
+    @property
+    def class_frequencies(self):
+        """Compute and return the class specific frequencies."""
+        freqs = np.zeros(len(self.CLASSES), dtype=np.float32)
+        for image, category in self._data:
+            freqs[category] += 1
+        return freqs/len(self._data)
+
+    def strided(self, N):
+        """Extract N images almost in equal proportions from each category."""
+        order = np.arange(len(self._data))
+        np.random.shuffle(order)
+        idxs = []
+        cat = 0
+        while len(idxs) < N:
+            for i in order:
+                image, category = self._data[i]
+                if cat == category:
+                    idxs.append(i)
+                    cat = (cat + 1) % len(self.CLASSES)
+                if len(idxs) >= N:
+                    break
+        return idxs
+
+def video2frame(dataset):
+    splits = ["train", "test", "val"]
+    for split in splits:
+        split_path = os.path.join(dataset + "/Videos", split)
+        num_list = os.listdir(split_path)
+        for num in sorted(num_list):
+            dir_path = os.path.join(split_path, num)
+            video_list = os.listdir(dir_path)
+            for video in sorted(video_list):
+                if not video.endswith(".mp4"):
+                    continue
+                v_num = video.split('.')[0]
+                new_path = os.path.join(dir_path, "video_" + v_num)
+                if not os.path.exists(new_path):
+                    os.mkdir(new_path)
+                    frame = v_num + "-%07d.jpg"
+                    ffmpeg_args = [
+                        "ffmpeg",
+                        "-i", 
+                        os.path.join(dir_path , video),
+                        "-r",
+                        "30",
+                        os.path.join(new_path, frame)
+                    ]
+                    popenObj = subprocess.Popen(
+                        args = ffmpeg_args
+                    )
+                    popenObj.wait()
+                    os.remove(os.path.join(dir_path , video))
+
+        #data = imread(image)
 
 
 if __name__ == "__main__":
     #main("/media/pyhuang/E/RoadText1k/Videos/train/0/2.mp4", '/media/pyhuang/E/RoadText1k/Ground_truths/Localisation/0_videos_results.json')
-    anno_path = '/media/pyhuang/E/RoadText1k/Ground_truths/Localisation'
-    labels = []
-    for anno in os.listdir(anno_path):
-        anno_labels = printLabels(path.join(anno_path, anno), anno.split('_')[0])
-        for label in anno_labels:
-            if label not in labels:
-                labels.append(label)
-    print(labels)
-    print(len(labels))
-
+    # anno_path = '/media/pyhuang/E/RoadText1k/Ground_truths/Localisation'
+    # labels = []
+    # for anno in os.listdir(anno_path):
+    #     anno_labels = printLabels(path.join(anno_path, anno), anno.split('_')[0])
+    #     for label in anno_labels:
+    #         if label not in labels:
+    #             labels.append(label)
+    # print(labels)
+    # print(len(labels))
+    dataset = "/home/pyhuang/UM/saliency_2021/traffic_sign/RoadText1k"
+    # train_set = trafficSignDataSet(dataset, split="train")
+    # test_set = trafficSignDataSet(dataset, split="test")
+    # training_batched = Batcher(train_set, 32)
+    # test_batched = Batcher(test_set, 32)
+    video2frame(dataset)
     
