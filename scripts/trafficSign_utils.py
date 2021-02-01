@@ -216,7 +216,7 @@ class trafficSignDataSet(Sequence):
         train: bool, Select the training or testing sets
         seed: int, The prng seed for the dataset
     """
-    CATERORIES = ["English_Text", "Licence_Plates"]
+    CATERORIES = ["Illegible", "English_Text", "Licence_Plates"]
 
     CLASSES = ["EMPTY", *CATERORIES]
 
@@ -227,11 +227,14 @@ class trafficSignDataSet(Sequence):
         filtered = []
         for image, signs in data:
             signs, acceptable = self._acceptable(signs)
-            if acceptable:
+            if acceptable and os.path.exists(image):
                 if not signs:
                     filtered.append((image, 0))
                 else:
-                    filtered.append((image, self.CLASSES.index(signs[0].name["English_Legible"][1])))
+                    if signs[0].visibility == "Illegible":
+                        filtered.append((image, 1))
+                    else:
+                        filtered.append((image, self.CLASSES.index(signs[0].name["English_Legible"][1])))
         return filtered
     
     def _acceptable(self, signs):
@@ -255,26 +258,6 @@ class trafficSignDataSet(Sequence):
 
     def __getitem__(self, i):
         image, category = self._data[i]
-        if not os.path.exists(image):
-            dir_path = image[:image.rfind("/")]
-            if not os.path.exists(dir_path):
-                os.mkdir(dir_path)
-            video_num = image[image.rfind("/")+1:].split("-")[0] + '.mp4'
-            frame = image[image.rfind("/")+1:].split("-")[0] +"-%7d.jpg"
-            ffmpeg_args = [
-                "ffmpeg",
-                "-i", 
-                os.path.join(dir_path[:dir_path.rfind("/")] , video_num),
-                "-r",
-                "30",
-                os.path.join(dir_path, frame)
-            ]
-
-            popenObj = subprocess.Popen(
-                args = ffmpeg_args
-            )
-            popenObj.wait()
-
         data = imread(image)
         data = data.astype(np.float32) / np.float32(255.)
         label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
@@ -324,12 +307,14 @@ def video2frame(dataset):
                 if not os.path.exists(new_path):
                     os.mkdir(new_path)
                     frame = v_num + "-%07d.jpg"
+                    video_capture = VideoCapture(os.path.join(dir_path, video))
+                    fps = video_capture.get(cv2.CAP_PROP_FPS)
                     ffmpeg_args = [
                         "ffmpeg",
                         "-i", 
                         os.path.join(dir_path , video),
                         "-r",
-                        "30",
+                        str(fps),
                         os.path.join(new_path, frame)
                     ]
                     popenObj = subprocess.Popen(

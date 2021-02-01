@@ -24,6 +24,7 @@ import zipfile
 
 from cv2 import imread, imwrite
 import keras.backend as K
+
 from keras.callbacks import Callback, ModelCheckpoint, LearningRateScheduler
 from keras.layers import Activation, BatchNormalization, Conv2D, \
     GlobalAveragePooling2D, MaxPooling2D, Dense, Input, add
@@ -32,13 +33,13 @@ from keras.optimizers import SGD, Adam
 from keras.regularizers import l2
 from keras.utils import Sequence, plot_model
 import numpy as np
-
+from tensorflow.python.client import device_lib
 from ats.core import attention_sampling
 from ats.utils.layers import L2Normalize, ResizeImages, SampleSoftmax, \
     ImageLinearTransform, ImagePan
 from ats.utils.regularizers import multinomial_entropy
 from ats.utils.training import Batcher
-
+import tensorflow as tf
 from tensorflow.compat.v1 import ConfigProto
 from tensorflow.compat.v1 import InteractiveSession
 
@@ -55,7 +56,11 @@ session = InteractiveSession(config=config)
 sess = K.get_session()
 sess = tf_debug.LocalCLIDebugWrapperSession(sess)
 K.set_session(sess)
-
+print(tf.test.gpu_device_name()) # string
+# /device:GPU:0
+print(tf.test.is_gpu_available()) # True/False
+print(device_lib.list_local_devices()) # list of DeviceAttributes (contains CPUs, GPUs and XLA_CPU and XLA_GPU)
+print(K.tensorflow_backend._get_available_gpus()) # list of strings
 class AttentionSaver(Callback):
     """Save the attention maps to monitor model evolution."""
     def __init__(self, output_directory, att_model, training_set, period=1):
@@ -359,6 +364,7 @@ def main(argv):
             training_batched,
             validation_data=test_batched,
             epochs=args.epochs,
+            steps_per_epoch=250,
             class_weight=class_weights,
             callbacks=callbacks,
             initial_epoch = int(args.load_epoch)
@@ -368,6 +374,7 @@ def main(argv):
             training_batched,
             validation_data=test_batched,
             epochs=args.epochs,
+            steps_per_epoch=250,
             class_weight=class_weights,
             callbacks=callbacks
         )
