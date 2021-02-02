@@ -122,19 +122,19 @@ class Sign(namedtuple("Sign", ["visibility", "bbox", "name"])):
     the dataset."""
     @property
     def x_min(self):
-        return self.bbox[2]
+        return self.bbox['x1']
 
     @property
     def x_max(self):
-        return self.bbox[0]
+        return self.bbox['x2']
 
     @property
     def y_min(self):
-        return self.bbox[3]
+        return self.bbox['y1']
 
     @property
     def y_max(self):
-        return self.bbox[1]
+        return self.bbox['y2']
 
     @property
     def area(self):
@@ -216,7 +216,7 @@ class trafficSignDataSet(Sequence):
         train: bool, Select the training or testing sets
         seed: int, The prng seed for the dataset
     """
-    CATERORIES = ["Illegible", "English_Text", "Licence_Plates"]
+    CATERORIES = ["English_Text", "Licence_Plates"]
 
     CLASSES = ["EMPTY", *CATERORIES]
 
@@ -228,30 +228,28 @@ class trafficSignDataSet(Sequence):
         for image, signs in data:
             signs, acceptable = self._acceptable(signs)
             if acceptable and os.path.exists(image):
+            #if os.path.exists(image):
                 if not signs:
                     filtered.append((image, 0))
                 else:
-                    if signs[0].visibility == "Illegible":
-                        filtered.append((image, 1))
-                    else:
-                        filtered.append((image, self.CLASSES.index(signs[0].name["English_Legible"][1])))
+                    filtered.append((image, self.CLASSES.index(signs[0].name["English_Legible"][1])))
         return filtered
     
     def _acceptable(self, signs):
         if not signs:
             return signs, True
         
-        f_signs = [s for s in signs if s.name["English_Legible"][1] in self.CATERORIES]
+        signs = sorted([s for s in signs if s.name["English_Legible"][1] in self.CATERORIES and s.visibility != "Illegible"])
 
          # No speed limit but many other signs
-        if not f_signs:
+        if not signs:
             return None, False
 
-        # Not visible sign so skip
-        # if signs[0].visibility == "Illegible":
-        #     return None, False
+        # Not legible sign so skip
+        if signs[0].visibility == "Illegible":
+            return None, False
 
-        return f_signs, True
+        return signs, True
 
     def __len__(self):
         return len(self._data)

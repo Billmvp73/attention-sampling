@@ -11,7 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             // "args": [ "/home/pyhuang/UM/attention/speed_limits_example", "/home/pyhuang/UM/attention/speed_limits_example", "--optimizer", "adam", "--epochs", "1000", "--resume", "True", "--load_epoch", "1000", "--load_dir", "/home/pyhuang/UM/attention/attention_sampling_keras", "--batch_size", "1"]
-            "args": [ "/home/pyhuang/UM/saliency_2021/traffic_sign/RoadText1k", "/home/pyhuang/UM/saliency_2021/traffic_sign/RoadText1k", "--optimizer", "adam", "--epochs", "1000"]
+            "args": [ "/home/pyhuang/UM/saliency_2021/traffic_sign/RoadText1k", "/home/pyhuang/UM/saliency_2021/traffic_sign/RoadText1k", "--lr","0.001", "--optimizer", "sgd", "--epochs", "200", "--decrease_lr_at", "100"]
         }
     ]
 }

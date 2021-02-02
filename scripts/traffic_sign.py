@@ -56,11 +56,7 @@ session = InteractiveSession(config=config)
 sess = K.get_session()
 sess = tf_debug.LocalCLIDebugWrapperSession(sess)
 K.set_session(sess)
-print(tf.test.gpu_device_name()) # string
-# /device:GPU:0
-print(tf.test.is_gpu_available()) # True/False
-print(device_lib.list_local_devices()) # list of DeviceAttributes (contains CPUs, GPUs and XLA_CPU and XLA_GPU)
-print(K.tensorflow_backend._get_available_gpus()) # list of strings
+
 class AttentionSaver(Callback):
     """Save the attention maps to monitor model evolution."""
     def __init__(self, output_directory, att_model, training_set, period=1):
@@ -253,7 +249,7 @@ def main(argv):
     parser.add_argument(
         "--decrease_lr_at",
         type=float,
-        default=250,
+        default=25,
         help="Decrease the learning rate in this epoch"
     )
 
@@ -272,7 +268,7 @@ def main(argv):
     parser.add_argument(
         "--n_patches",
         type=int,
-        default=5,
+        default=10,
         help="How many patches to sample"
     )
     parser.add_argument(
@@ -351,20 +347,19 @@ def main(argv):
     #plot_model(model, to_file=path.join(args.output, "model.png"))
 
     callbacks = [
-        AttentionSaver(args.output, att_model, training_set),
+        AttentionSaver(args.output, att_model, training_set, period=5),
         ModelCheckpoint(
             path.join(args.output, "weights.{epoch:02d}.h5"),
             save_weights_only=True
         ),
-        LearningRateScheduler(get_lr_schedule(args)),
-        TensorBoard(log_dir=args.output+"/logs", histogram_freq=0, batch_size=args.batch_size, write_grads=True, write_images=True)
+        LearningRateScheduler(get_lr_schedule(args))
     ]
     if args.resume:
         model.fit_generator(
             training_batched,
             validation_data=test_batched,
             epochs=args.epochs,
-            steps_per_epoch=250,
+            # steps_per_epoch=100,
             class_weight=class_weights,
             callbacks=callbacks,
             initial_epoch = int(args.load_epoch)
@@ -374,7 +369,7 @@ def main(argv):
             training_batched,
             validation_data=test_batched,
             epochs=args.epochs,
-            steps_per_epoch=250,
+            # steps_per_epoch=100,
             class_weight=class_weights,
             callbacks=callbacks
         )
