@@ -9,7 +9,7 @@ import string
 import sys
 import zipfile
 
-from cv2 import imread, imwrite
+from cv2 import imread, imwrite, resize
 import keras.backend as K
 from keras.callbacks import Callback, ModelCheckpoint, LearningRateScheduler
 from keras.layers import Activation, BatchNormalization, Conv2D, \
@@ -196,53 +196,76 @@ class Sign(namedtuple("Sign", ["visibility", "bbox", "type", "name"])):
 class STS:
     """The STS class reads the annotations and creates the corresponding
     Sign objects."""
-    def __init__(self, directory, train=True, seed=0):
-        ensure_dataset_exists(directory)
+    def __init__(self, directory, CLASSES, sets=None):
 
         self._directory = directory
-        self._inner = "Set{}".format(1 + ((seed + 1 + int(train)) % 2))
-        self._data = self._load_signs(self._directory, self._inner)
+        self._sets = sets
+        self.CLASSES = CLASSES
+        self.CLASSES_LEN = len(self.CLASSES)
+        self.CLASS_TO_IDX = dict(zip(self.CLASSES, range(self.CLASSES_LEN)))
+        self._data = self._load_files(self._directory, self._sets)
 
     def _load_files(self, directory, inner):
-        files = set()
-        with open(path.join(directory, inner, "annotations.txt")) as f:
-            for l in f:
-                files.add(l.split(":", 1)[0])
-        return sorted(files)
+        img_path = os.path.join(directory, "image_2")
+        label_path = os.path.join(directory, "label_2")
+        images = []
+        annotations = []
+        if inner is None:
+            inner = []
+            for f in os.listdir(img_path):
+                inner.append(f.split(".")[0])
+            # inner = [f.split(".")[0] if f.endswith(".png") for f in os.listdir(img_path)]
+        for name in inner:
+            img = os.path.join(img_path, name + ".png")
+            gt_file = os.path.join(label_path, name + ".txt")
+            annotation = self._load_annotation(gt_file)
+            if len(annotation) > 0:
+                images.append(img)
+                annotations.append(annotation)
+        return list(zip(images, annotations))
 
-    def _read_bbox(self, parts):
-        def _float(x):
+    def _load_annotation(self, gt_file):
+        with open(gt_file, 'r') as f:
+            lines = f.readlines()
+        f.close()
+
+        annotations = []
+
+        #each line is an annotation bounding box
+        for line in lines:
+            obj = line.strip().split(' ')
+
+            #get class, if class is not in listed, skip it
             try:
-                return float(x)
-            except ValueError:
-                if len(x) > 0:
-                    return _float(x[:-1])
-                raise
-        return [_float(x) for x in parts]
+                cls = self.CLASS_TO_IDX[obj[0].lower().strip()]
+                # print cls
 
-    def _load_signs(self, directory, inner):
-        with open(path.join(directory, inner, "annotations.txt")) as f:
-            lines = [l.strip() for l in f]
-        keys, values = zip(*(l.split(":", 1) for l in lines))
-        all_signs = []
-        for v in values:
-            signs = []
-            for sign in v.split(";"):
-                if sign == [""] or sign == "":
-                    continue
-                parts = [s.strip() for s in sign.split(",")]
-                if parts[0] == "MISC_SIGNS":
-                    continue
-                signs.append(Sign(
-                    visibility=parts[0],
-                    bbox=self._read_bbox(parts[1:5]),
-                    type=parts[5],
-                    name=parts[6]
-                ))
-            all_signs.append(signs)
-        images = [path.join(directory, inner, f) for f in keys]
 
-        return list(zip(images, all_signs))
+                #get coordinates
+                xmin = float(obj[4])
+                ymin = float(obj[5])
+                xmax = float(obj[6])
+                ymax = float(obj[7])
+
+
+                #check for valid bounding boxes
+                assert xmin >= 0.0 and xmin <= xmax, \
+                    'Invalid bounding box x-coord xmin {} or xmax {} at {}' \
+                        .format(xmin, xmax, gt_file)
+                assert ymin >= 0.0 and ymin <= ymax, \
+                    'Invalid bounding box y-coord ymin {} or ymax {} at {}' \
+                        .format(ymin, ymax, gt_file)
+
+
+                #transform to  point + width and height representation
+                # x, y, w, h = bbox_transform_inv([xmin, ymin, xmax, ymax])
+                x, y, w, h = (xmin, ymin, xmax, ymax)
+
+                annotations.append([x, y, w, h, cls])
+
+            except:
+                continue
+        return annotations
 
     def __len__(self):
         return len(self._data)
@@ -250,8 +273,10 @@ class STS:
     def __getitem__(self, i):
         return self._data[i]
 
+    
 
-class SpeedLimits(Sequence):
+
+class KittiData(Sequence):
     """Provide a Keras Sequence for the SpeedLimits dataset which is basically
     a filtered version of the STS dataset.
 
@@ -262,44 +287,50 @@ class SpeedLimits(Sequence):
         train: bool, Select the training or testing sets
         seed: int, The prng seed for the dataset
     """
-    LIMITS = ["50_SIGN", "70_SIGN", "80_SIGN"]
-    CLASSES = ["EMPTY", *LIMITS]
+    #LIMITS = ["50_SIGN", "70_SIGN", "80_SIGN"]
+    CLASSES = ['car', 'van', 'truck',
+                     'pedestrian', 'cyclist' , 'dontcare']
 
-    def __init__(self, directory, train=True, seed=0):
-        self._data = self._filter(STS(directory, train, seed))
+    def __init__(self, directory, split='train', sets=None):
+        self.directory = directory
+        if split == 'train' or split == 'val':
+            self.directory = os.path.join(self.directory, "training")
+        else:
+            self.directory = os.path.join(self.directory, "testing")
+        self.split = split
+        self._data = self._filter(STS(self.directory, self.CLASSES, sets))
+
 
     def _filter(self, data):
         filtered = []
-        for image, signs in data:
-            signs, acceptable = self._acceptable(signs)
-            if acceptable:
-                if not signs:
-                    filtered.append((image, 0))
-                else:
-                    # name = signs[0].name
-                    # for i in range(1, len(signs)):
-                    #     if name != signs[i].name:
-                    #         print("not all the same.")
-                    filtered.append((image, self.CLASSES.index(signs[0].name)))
+        for image, annos in data:
+            # signs, acceptable = self._acceptable(signs)
+            # if acceptable:
+            #     if not signs:
+            #         filtered.append((image, 0))
+            #     else:
+            #         filtered.append((image, self.CLASSES.index(signs[0].name)))
+            categories = [a[-1] for a in annos]
+            filtered.append((image, categories))
         return filtered
 
-    def _acceptable(self, signs):
-        # Keep it as empty
-        if not signs:
-            return signs, True
+    # def _acceptable(self, signs):
+    #     # Keep it as empty
+    #     if not signs:
+    #         return signs, True
 
-        # Filter just the speed limits and sort them wrt visibility
-        signs = sorted(s for s in signs if s.name in self.LIMITS)
+    #     # Filter just the speed limits and sort them wrt visibility
+    #     signs = sorted(s for s in signs if s.name in self.LIMITS)
 
-        # No speed limit but many other signs
-        if not signs:
-            return None, False
+    #     # No speed limit but many other signs
+    #     if not signs:
+    #         return None, False
 
-        # Not visible sign so skip
-        if signs[0].visibility != "VISIBLE":
-            return None, False
+    #     # Not visible sign so skip
+    #     if signs[0].visibility != "VISIBLE":
+    #         return None, False
 
-        return signs, True
+    #     return signs, True
 
     def __len__(self):
         return len(self._data)
@@ -307,10 +338,55 @@ class SpeedLimits(Sequence):
     def __getitem__(self, i):
         image, category = self._data[i]
         data = imread(image)
+        data = resize(data, (1242, 375))
         data = data.astype(np.float32) / np.float32(255.)
-        label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
-
+        # label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
+        label = np.zeros(len(self.CLASSES), dtype=np.float32)
+        for c in category:
+            label[c] = 1
         return data, label
+
+    def _load_annotation(gt_file):
+        with open(gt_file, 'r') as f:
+            lines = f.readlines()
+        f.close()
+
+        annotations = []
+
+        #each line is an annotation bounding box
+        for line in lines:
+            obj = line.strip().split(' ')
+
+            #get class, if class is not in listed, skip it
+            try:
+                cls = config.CLASS_TO_IDX[obj[0].lower().strip()]
+                # print cls
+
+
+                #get coordinates
+                xmin = float(obj[4])
+                ymin = float(obj[5])
+                xmax = float(obj[6])
+                ymax = float(obj[7])
+
+
+                #check for valid bounding boxes
+                assert xmin >= 0.0 and xmin <= xmax, \
+                    'Invalid bounding box x-coord xmin {} or xmax {} at {}' \
+                        .format(xmin, xmax, gt_file)
+                assert ymin >= 0.0 and ymin <= ymax, \
+                    'Invalid bounding box y-coord ymin {} or ymax {} at {}' \
+                        .format(ymin, ymax, gt_file)
+
+
+                #transform to  point + width and height representation
+                x, y, w, h = bbox_transform_inv([xmin, ymin, xmax, ymax])
+
+                annotations.append([x, y, w, h, cls])
+
+            except:
+                continue
+        return annotations
 
     @property
     def image_size(self):
@@ -333,7 +409,7 @@ class SpeedLimits(Sequence):
         while len(idxs) < N:
             for i in order:
                 image, category = self._data[i]
-                if cat == category:
+                if cat in category:
                     idxs.append(i)
                     cat = (cat + 1) % len(self.CLASSES)
                 if len(idxs) >= N:

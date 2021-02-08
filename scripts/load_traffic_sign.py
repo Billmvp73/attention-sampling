@@ -1,3 +1,16 @@
+#!/usr/bin/env python
+#
+# Copyright (c) 2019 Idiap Research Institute, http://www.idiap.ch/
+# Written by Angelos Katharopoulos <angelos.katharopoulos@idiap.ch>
+#
+
+"""Download the Swedish Traffic Signs dataset and create the Speed Limit Signs
+dataset from and train with attention sampling.
+
+NOTE: Swedish Traffic Signs dataset is provided from
+      https://www.cvl.isy.liu.se/research/datasets/traffic-signs-dataset/ .
+"""
+
 import argparse
 from collections import namedtuple
 from functools import partial
@@ -10,23 +23,25 @@ import sys
 import zipfile
 
 from cv2 import imread, imwrite
+from matplotlib import pyplot as plt
+import matplotlib
 import keras.backend as K
+
 from keras.callbacks import Callback, ModelCheckpoint, LearningRateScheduler
 from keras.layers import Activation, BatchNormalization, Conv2D, \
     GlobalAveragePooling2D, MaxPooling2D, Dense, Input, add
-from keras.models import Model, load_model
+from keras.models import Model
 from keras.optimizers import SGD, Adam
 from keras.regularizers import l2
 from keras.utils import Sequence, plot_model
 import numpy as np
-
+from tensorflow.python.client import device_lib
 from ats.core import attention_sampling
-from ats.core import sample, SamplePatches
 from ats.utils.layers import L2Normalize, ResizeImages, SampleSoftmax, \
-    ImageLinearTransform, ImagePan, ActivityRegularizer
+    ImageLinearTransform, ImagePan
 from ats.utils.regularizers import multinomial_entropy
 from ats.utils.training import Batcher
-
+import tensorflow as tf
 from tensorflow.compat.v1 import ConfigProto
 from tensorflow.compat.v1 import InteractiveSession
 
@@ -34,34 +49,54 @@ from tensorflow import ConfigProto
 from tensorflow import InteractiveSession
 from tensorflow.python import debug as tf_debug
 from keras.callbacks import TensorBoard
-import tensorflow as tf
-from speed_utils import STS, Sign, SpeedLimits
+#from speed_utils import Sign, STS, SpeedLimits
+from trafficSign_utils import trafficSignDataSet, Sign, RoadText1k
 
-import matplotlib.pyplot as plt
-from timer import Timer
-
-config = ConfigProto(device_count = {'GPU': 0})
-# config = ConfigProto()
-# config.gpu_options.allow_growth = True
+config = ConfigProto()
+config.gpu_options.allow_growth = True
 session = InteractiveSession(config=config)
 sess = K.get_session()
 sess = tf_debug.LocalCLIDebugWrapperSession(sess)
 K.set_session(sess)
 
-def attention(x):
-    params = dict(
-        activation="relu",
-        padding="valid",
-        kernel_regularizer=l2(1e-5)
-    )
-    x = Conv2D(8, kernel_size=3, **params)(x)
-    x = Conv2D(16, kernel_size=3, **params)(x)
-    x = Conv2D(32, kernel_size=3, **params)(x)
-    x = Conv2D(1, kernel_size=3)(x)
-    x = MaxPooling2D(pool_size=8)(x)
-    x = SampleSoftmax(squeeze_channels=True, smooth=1e-4)(x)
+class AttentionSaver(Callback):
+    """Save the attention maps to monitor model evolution."""
+    def __init__(self, output_directory, att_model, training_set, period=1):
+        self._dir = path.join(output_directory, "attention")
+        try:
+            os.mkdir(self._dir)
+        except FileExistsError:
+            pass
+        self._att_model = att_model
+        idxs = training_set.strided(10)
+        data = [training_set[i] for i in idxs]
+        self._X = np.array([d[0] for d in data])
+        self._Y = np.array([d[1] for d in data]).argmax(axis=1)
+        np.savetxt(
+            path.join(self._dir, "points.txt"),
+            np.array([[i, yi] for i, yi in zip(idxs, self._Y)]).astype(int),
+            fmt="%d"
+        )
+        self.period = period
+        self.epoch_since_last_save = 0
 
-    return x
+    def on_train_begin(self, *args):
+        _, _, x_low = self._att_model.predict(self._X)
+        for i, xi in enumerate(x_low):
+            self._imsave(path.join(self._dir, "{}.jpg").format(i), xi)
+
+    def on_epoch_end(self, e, logs):
+        self.epoch_since_last_save += 1
+        if self.epoch_since_last_save >= self.period:
+            self.epoch_since_last_save = 0
+            att, patches, _ = self._att_model.predict(self._X)
+            for i, att_i in enumerate(att):
+                np.save(path.join(self._dir, "att_{}_{}.npy").format(e, i), att_i)
+
+    def _imsave(self, filepath, x):
+        x = (x*255).astype(np.uint8)
+        imwrite(filepath, x)
+
 
 def resnet(x, strides=[1, 2, 2, 2], filters=[32, 32, 32, 32]):
     """Implement a simple resnet."""
@@ -112,6 +147,22 @@ def resnet(x, strides=[1, 2, 2, 2], filters=[32, 32, 32, 32]):
     return y
 
 
+def attention(x):
+    params = dict(
+        activation="relu",
+        padding="valid",
+        kernel_regularizer=l2(1e-5)
+    )
+    x = Conv2D(8, kernel_size=3, **params)(x)
+    x = Conv2D(16, kernel_size=3, **params)(x)
+    x = Conv2D(32, kernel_size=3, **params)(x)
+    x = Conv2D(1, kernel_size=3)(x)
+    x = MaxPooling2D(pool_size=8)(x)
+    x = SampleSoftmax(squeeze_channels=True, smooth=1e-4)(x)
+
+    return x
+
+
 def get_model(outputs, width, height, scale, n_patches, patch_size, reg):
     x_in = Input(shape=(height, width, 3))
     x_high = ImageLinearTransform()(x_in)
@@ -133,6 +184,7 @@ def get_model(outputs, width, height, scale, n_patches, patch_size, reg):
         Model(inputs=x_in, outputs=[y]),
         Model(inputs=x_in, outputs=[att, patches, x_low])
     )
+
 
 def get_optimizer(args):
     optimizer = args.optimizer
@@ -156,6 +208,7 @@ def get_lr_schedule(args):
             return lr * 0.1
 
     return get_lr
+
 
 def main(argv):
     parser = argparse.ArgumentParser(
@@ -198,7 +251,7 @@ def main(argv):
     parser.add_argument(
         "--decrease_lr_at",
         type=float,
-        default=250,
+        default=25,
         help="Decrease the learning rate in this epoch"
     )
 
@@ -264,13 +317,16 @@ def main(argv):
     args = parser.parse_args(argv)
 
     # Load the data
-    training_set = SpeedLimits(args.dataset, train=True)
-    test_set = SpeedLimits(args.dataset, train=False)
+    # training_set = SpeedLimits(args.dataset, train=True)
+    # test_set = SpeedLimits(args.dataset, train=False)
+    training_set = trafficSignDataSet(args.dataset, split="train")
+    testing_set = trafficSignDataSet(args.dataset, split="val")
     training_batched = Batcher(training_set, args.batch_size)
-    test_batched = Batcher(test_set, args.batch_size)
+    test_batched = Batcher(testing_set, args.batch_size)
 
     # Create the models
     H, W = training_set.image_size
+    # H = 780
     class_weights = training_set.class_frequencies
     class_weights = (1./len(class_weights)) / class_weights
     model, att_model = get_model(
@@ -281,7 +337,7 @@ def main(argv):
         args.patch_size,
         args.regularizer_strength
     )
-    
+   
     if args.resume:
         load_path = os.path.join(args.load_dir, "weights."+ str(args.load_epoch) + ".h5")
         model.load_weights(load_path)
@@ -291,16 +347,26 @@ def main(argv):
         optimizer=get_optimizer(args),
         metrics=["accuracy", "categorical_crossentropy"]
         )
+        # model.fit_generator(
+        #     training_batched,
+        #     validation_data=test_batched,
+        #     epochs=args.epochs,
+        #     # steps_per_epoch=100,
+        #     class_weight=class_weights,
+        #     callbacks=callbacks,
+        #     initial_epoch = int(args.load_epoch)
+        # )
     else:
         model.compile(
         loss="categorical_crossentropy",
         optimizer=get_optimizer(args),
         metrics=["accuracy", "categorical_crossentropy"]
         )
+
         plot_model(model, to_file=path.join(args.output, "model.png"))
 
         callbacks = [
-            AttentionSaver(args.output, att_model, training_set),
+            AttentionSaver(args.output, att_model, training_set, period=5),
             ModelCheckpoint(
                 path.join(args.output, "weights.{epoch:02d}.h5"),
                 save_weights_only=True
@@ -308,24 +374,16 @@ def main(argv):
             LearningRateScheduler(get_lr_schedule(args)),
             TensorBoard(log_dir=args.output+"/logs", histogram_freq=0, batch_size=args.batch_size, write_grads=True, write_images=True)
         ]
+        
         model.fit_generator(
             training_batched,
             validation_data=test_batched,
             epochs=args.epochs,
+            # steps_per_epoch=100,
             class_weight=class_weights,
             callbacks=callbacks
         )
-    # while len(model.layers) > 12:
-    #     model.layers.pop()
-    # model.summary()
-    # model.compile(
-    #     loss="categorical_crossentropy",
-    #     optimizer=get_optimizer(args),
-    #     metrics=["accuracy", "categorical_crossentropy"]
-    # )
-    #x_high = model.layers[2].output
-    #x_low = model.layers[3].output
-    #attention_map = model.layers[10].output
+    
     intermediate_low = model.layers[3].output
     intermediate_sample = model.layers[11].output
     intermediate_attention_map = model.layers[10].output
@@ -333,49 +391,50 @@ def main(argv):
     model_b = Model(model.input, [intermediate_low, intermediate_sample[0], intermediate_sample[1], intermediate_sample[2], intermediate_attention_map])
     if not os.path.exists("test_patch"):
         os.mkdir("test_patch")
+
+    Belgium_dataset = "/home/pyhuang/UM/saliency_2021/traffic_sign/BelgiumTS/Seq01/00"
+    Belgium_list = sorted(os.listdir(Belgium_dataset))
+    iteration = 0
+    for belgium in Belgium_list:
+        img_path = os.path.join(Belgium_dataset, belgium)
+        img = plt.imread(img_path)
+        print(img.shape)
     for inputs, targets in test_batched:
         #with tf.GradientTape() as tape:
         #Forward pass.
-        timer_batch = Timer(desc="time per batch")
-        timer_batch.start_time()
+        # timer_batch = Timer(desc="time per batch")
+        # timer_batch.start_time()
         low, patches, sampled_attention, samples, attention_map = model_b.predict(inputs)
         #model.evaluate()
         #loss = model.test_on_batch(inputs, targets)
         # low, high, ats_map = model_b.predict(inputs)
         # sample_space = K.shape(ats_map)[1:]
         # samples, sampled_attention = sample(args.n_patches, ats_map, sample_space, receptive_field=9, replace=False)
-        timer_batch.end_time()
-        # for b in range(patches.shape[0]):
-        #     imgs = patches[b]
-        #     sample = samples[b]
-        #     fig, axs = plt.subplots(2)
-        #     axs[0].imshow(low[b])
-        #     axs[0].axis('off')
-        #     axs[1].imshow(attention_map[b])
-        #     axs[1].axis('off')
-        #     plt.savefig("test_patch/input%d.png" % b)
-        #     plt.clf()
+        #timer_batch.end_time()
+        for b in range(patches.shape[0]):
+            imgs = patches[b]
+            sample = samples[b]
+            fig, axs = plt.subplots(2)
+            axs[0].imshow(low[b])
+            axs[0].axis('off')
+            axs[1].imshow(attention_map[b])
+            axs[1].axis('off')
+            plt.savefig("test_patch/input%d_%d.png" % (iteration, b))
+            plt.clf()
+        iteration += 1
+        if iteration > 10:
+            break
         #     for i in range(imgs.shape[0]):
         #         patch = imgs[i]
         #         sample_i = sample[i]
-        #         print("img %d sample %d location: "%(b, i), sample_i)
+        #         # print("img %d sample %d location: "%(b, i), sample_i)
         #         plt.imshow(patch)
         #         plt.axis('off')
         #         plt.savefig("test_patch/b%d_patch_%d.png" % (b, i))
         #         plt.clf()
-        break    
+        # break    
         # attention_regularizer = multinomial_entropy(args.regularizer_strength)
         # attention_map = ActivityRegularizer(attention_regularizer)(attention_map)
 
-
-
-
 if __name__ == "__main__":
     main(None)
-
-# new_model = load_model('/home/pyhuang/UM/attention/attention_sampling_keras/weights.1000.h5')
-# new_model.summary()
-# new_model.trainable = False    
-# while len(new_model.layers) > 12:
-#     new_model.layers.pop()
-# test_img = 
