@@ -357,7 +357,7 @@ def main(argv):
     plot_model(model, to_file=path.join(args.output, "model.png"))
 
     callbacks = [
-        AttentionSaver(args.output, att_model, training_set),
+        # AttentionSaver(args.output, att_model, training_set),
         ModelCheckpoint(
             path.join(args.output, "weights.{epoch:02d}.h5"),
             save_weights_only=True
