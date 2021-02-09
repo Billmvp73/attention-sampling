@@ -288,8 +288,8 @@ class KittiData(Sequence):
         seed: int, The prng seed for the dataset
     """
     #LIMITS = ["50_SIGN", "70_SIGN", "80_SIGN"]
-    CLASSES = ['car', 'van', 'truck',
-                     'pedestrian', 'cyclist' , 'dontcare']
+    CLASSES = ['dontcare', 'car', 'van', 'truck',
+                     'pedestrian', 'cyclist']
 
     def __init__(self, directory, split='train', sets=None):
         self.directory = directory
@@ -311,7 +311,7 @@ class KittiData(Sequence):
             #     else:
             #         filtered.append((image, self.CLASSES.index(signs[0].name)))
             categories = [a[-1] for a in annos]
-            filtered.append((image, categories))
+            filtered.append((image, categories[0]))
         return filtered
 
     # def _acceptable(self, signs):
@@ -340,10 +340,10 @@ class KittiData(Sequence):
         data = imread(image)
         data = resize(data, (1242, 375))
         data = data.astype(np.float32) / np.float32(255.)
-        # label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
-        label = np.zeros(len(self.CLASSES), dtype=np.float32)
-        for c in category:
-            label[c] = 1
+        label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
+        # label = np.zeros(len(self.CLASSES), dtype=np.float32)
+        # for c in category:
+        #     label[c] = 1
         return data, label
 
     def _load_annotation(gt_file):
@@ -385,7 +385,7 @@ class KittiData(Sequence):
                 annotations.append([x, y, w, h, cls])
 
             except:
-                continue
+                annotations.append([-1, -1, -1, -1, 0])
         return annotations
 
     @property
@@ -409,7 +409,7 @@ class KittiData(Sequence):
         while len(idxs) < N:
             for i in order:
                 image, category = self._data[i]
-                if cat in category:
+                if cat == category:
                     idxs.append(i)
                     cat = (cat + 1) % len(self.CLASSES)
                 if len(idxs) >= N:
