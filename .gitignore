@@ -5,3 +5,4 @@ dist
 *.egg-info
 *.so
 test_patch/*
+speed_limits_dataset/*
