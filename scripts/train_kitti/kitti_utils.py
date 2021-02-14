@@ -1,4 +1,3 @@
-import argparse
 from collections import namedtuple
 from functools import partial
 import hashlib
@@ -34,146 +33,197 @@ from tensorflow import InteractiveSession
 from tensorflow.python import debug as tf_debug
 from keras.callbacks import TensorBoard
 
-
-def check_file(filepath, md5sum):
-    """Check a file against an md5 hash value.
-
-    Returns
-    -------
-        True if the file exists and has the given md5 sum False otherwise
-    """
-    try:
-        md5 = hashlib.md5()
-        with open(filepath, "rb") as f:
-            for chunk in iter(partial(f.read, 4096), b""):
-                md5.update(chunk)
-        return md5.hexdigest() == md5sum
-    except FileNotFoundError:
-        return False
-
-
-def download_file(url, destination, progress_file=sys.stderr):
-    """Download a file with progress."""
-    response = urllib.request.urlopen(url)
-    n_bytes = response.headers.get("Content-Length")
-    if n_bytes == "":
-        n_bytes = 0
-    else:
-        n_bytes = int(n_bytes)
-
-    message = "\rReceived {} / {}"
-    cnt = 0
-    with open(destination, "wb") as dst:
-        while True:
-            print(message.format(cnt, n_bytes), file=progress_file,
-                  end="", flush=True)
-            data = response.read(65535)
-            if len(data) == 0:
-                break
-            dst.write(data)
-            cnt += len(data)
-    print(file=progress_file)
-
-
-def ensure_dataset_exists(directory, tries=1, progress_file=sys.stderr):
-    """Ensure that the dataset is downloaded and is correct.
-
-    Correctness is checked only against the annotations files.
-    """
-    set1_url = ("http://www.isy.liu.se/cvl/research/trafficSigns"
-                "/swedishSignsSummer/Set1/Set1Part0.zip")
-    set1_annotations_url = ("http://www.isy.liu.se/cvl/research/trafficSigns"
-                            "/swedishSignsSummer/Set1/annotations.txt")
-    set1_annotations_md5 = "9106a905a86209c95dc9b51d12f520d6"
-    set2_url = ("http://www.isy.liu.se/cvl/research/trafficSigns"
-                "/swedishSignsSummer/Set2/Set2Part0.zip")
-    set2_annotations_url = ("http://www.isy.liu.se/cvl/research/trafficSigns"
-                            "/swedishSignsSummer/Set2/annotations.txt")
-    set2_annotations_md5 = "09debbc67f6cd89c1e2a2688ad1d03ca"
-
-    integrity = (
-        check_file(
-            path.join(directory, "Set1", "annotations.txt"),
-            set1_annotations_md5
-        ) and check_file(
-            path.join(directory, "Set2", "annotations.txt"),
-            set2_annotations_md5
+class AttentionSaver(Callback):
+    """Save the attention maps to monitor model evolution."""
+    def __init__(self, output_directory, att_model, training_set, period=1):
+        self._dir = path.join(output_directory, "attention")
+        try:
+            os.mkdir(self._dir)
+        except FileExistsError:
+            pass
+        self._att_model = att_model
+        idxs = training_set.strided(10)
+        data = [training_set[i] for i in idxs]
+        self._X = np.array([d[0] for d in data])
+        self._Y = np.array([d[1] for d in data]).argmax(axis=1)
+        np.savetxt(
+            path.join(self._dir, "points.txt"),
+            np.array([[i, yi] for i, yi in zip(idxs, self._Y)]).astype(int),
+            fmt="%d"
         )
+        self.period = period
+        self.epoch_since_last_save = 0
+
+    def on_train_begin(self, *args):
+        _, _, x_low = self._att_model.predict(self._X)
+        for i, xi in enumerate(x_low):
+            self._imsave(path.join(self._dir, "{}.jpg").format(i), xi)
+
+    def on_epoch_end(self, e, logs):
+        self.epoch_since_last_save += 1
+        if self.epoch_since_last_save >= self.period:
+            self.epoch_since_last_save = 0
+            att, patches, _ = self._att_model.predict(self._X)
+            for i, att_i in enumerate(att):
+                np.save(path.join(self._dir, "att_{}_{}.npy").format(e, i), att_i)
+
+    def _imsave(self, filepath, x):
+        x = (x*255).astype(np.uint8)
+        imwrite(filepath, x)
+
+
+def resnet(x, strides=[1, 2, 2, 2], filters=[32, 32, 32, 32]):
+    """Implement a simple resnet."""
+    # Do a convolution on x
+    def c(x, filters, kernel, strides):
+        return Conv2D(filters, kernel_size=kernel, strides=strides,
+                      padding="same", use_bias=False)(x)
+
+    # Do a BatchNorm on x
+    def b(x):
+        return BatchNormalization()(x)
+
+    # Obviosuly just do relu
+    def relu(x):
+        return Activation("relu")(x)
+
+    # Implement a resnet block. short is True when we need to add a convolution
+    # for the shortcut
+    def block(x, filters, strides, short):
+        x = b(x)
+        x = relu(x)
+        x_short = x
+        if short:
+            x_short = c(x, filters, 1, strides)
+        x = c(x, filters, 3, strides)
+        x = b(x)
+        x = relu(x)
+        x = c(x, filters, 3, 1)
+        x = add([x, x_short])
+
+        return x
+
+    # Implement the resnet
+    stride_prev = strides.pop(0)
+    filters_prev = filters.pop(0)
+    y = c(x, filters_prev, 3, stride_prev)
+    for s, f in zip(strides, filters):
+        y = block(y, f, s, s != 1 or f != filters_prev)
+        stride_prev = s
+        filters_prev = f
+    y = b(y)
+    y = relu(y)
+
+    # Average the final features and normalize them
+    y = GlobalAveragePooling2D()(y)
+    y = L2Normalize()(y)
+
+    return y
+
+
+def attention(x):
+    params = dict(
+        activation="relu",
+        padding="valid",
+        kernel_regularizer=l2(1e-5)
+    )
+    x = Conv2D(8, kernel_size=3, **params)(x)
+    x = Conv2D(16, kernel_size=3, **params)(x)
+    x = Conv2D(32, kernel_size=3, **params)(x)
+    x = Conv2D(1, kernel_size=3)(x)
+    x = MaxPooling2D(pool_size=8)(x)
+    x = SampleSoftmax(squeeze_channels=True, smooth=1e-4)(x)
+
+    return x
+
+
+def get_model(outputs, width, height, scale, n_patches, patch_size, reg):
+    x_in = Input(shape=(height, width, 3))
+    x_high = ImageLinearTransform()(x_in)
+    x_high = ImagePan(horizontally=True, vertically=True)(x_high)
+    x_low = ResizeImages((int(height*scale), int(width*scale)))(x_high)
+
+    features, att, patches = attention_sampling(
+        attention,
+        resnet,
+        patch_size,
+        n_patches,
+        replace=False,
+        attention_regularizer=multinomial_entropy(reg),
+        receptive_field=9
+    )([x_low, x_high])
+    y = Dense(outputs, activation="softmax")(features)
+
+    return (
+        Model(inputs=x_in, outputs=[y]),
+        Model(inputs=x_in, outputs=[att, patches, x_low])
     )
 
-    if integrity:
-        return
+def get_optimizer(args):
+    optimizer = args.optimizer
 
-    if tries <= 0:
-        raise RuntimeError(("Cannot download dataset or dataset download "
-                            "is corrupted"))
+    if optimizer == "sgd":
+        return SGD(lr=args.lr, momentum=args.momentum, clipnorm=args.clipnorm)
+    elif optimizer == "adam":
+        return Adam(lr=args.lr, clipnorm=args.clipnorm)
 
-    print("Downloading Set1", file=progress_file)
-    download_file(set1_url, path.join(directory, "Set1.zip"),
-                  progress_file=progress_file)
-    print("Extracting...", file=progress_file)
-    with zipfile.ZipFile(path.join(directory, "Set1.zip")) as archive:
-        archive.extractall(path.join(directory, "Set1"))
-    print("Getting annotation file", file=progress_file)
-    download_file(
-        set1_annotations_url,
-        path.join(directory, "Set1", "annotations.txt"),
-        progress_file=progress_file
-    )
-    print("Downloading Set2", file=progress_file)
-    download_file(set2_url, path.join(directory, "Set2.zip"),
-                  progress_file=progress_file)
-    print("Extracting...", file=progress_file)
-    with zipfile.ZipFile(path.join(directory, "Set2.zip")) as archive:
-        archive.extractall(path.join(directory, "Set2"))
-    print("Getting annotation file", file=progress_file)
-    download_file(
-        set2_annotations_url,
-        path.join(directory, "Set2", "annotations.txt"),
-        progress_file=progress_file
-    )
-
-    return ensure_dataset_exists(
-        directory,
-        tries=tries-1,
-        progress_file=progress_file
-    )
+    raise ValueError("Invalid optimizer {}".format(optimizer))
 
 
-class Sign(namedtuple("Sign", ["visibility", "bbox", "type", "name"])):
-    """A sign object. Useful for making ground truth images as well as making
+def get_lr_schedule(args):
+    lr = args.lr
+    decrease_lr_at = args.decrease_lr_at
+
+    def get_lr(epoch):
+        if epoch < decrease_lr_at:
+            return lr
+        else:
+            return lr * 0.1
+
+    return get_lr
+
+
+class CropObj(namedtuple("CropObj", ["bbox", "name"])):
+    """A cropped object. Useful for making ground truth images as well as making
     the dataset."""
     @property
     def x_min(self):
-        return self.bbox[2]
+        return int(round(self.bbox[0]))
 
     @property
     def x_max(self):
-        return self.bbox[0]
+        return int(round(self.bbox[2]))
 
     @property
     def y_min(self):
-        return self.bbox[3]
+        return int(round(self.bbox[1]))
 
     @property
     def y_max(self):
-        return self.bbox[1]
+        return int(round(self.bbox[3]))
+
+    @property
+    def width(self):
+        return self.x_max - self.x_min
+
+    @property
+    def height(self):
+        return self.y_max - self.y_min
 
     @property
     def area(self):
         return (self.x_max - self.x_min) * (self.y_max - self.y_min)
 
     @property
-    def center(self):
-        return [
-            (self.y_max - self.y_min)/2 + self.y_min,
-            (self.x_max - self.x_min)/2 + self.x_min
-        ]
+    def size(self):
+        return [self.width, self.height]
 
     @property
-    def visibility_index(self):
-        visibilities = ["VISIBLE", "BLURRED", "SIDE_ROAD", "OCCLUDED"]
-        return visibilities.index(self.visibility)
+    def center(self):
+        return [
+            self.x_min + self.width / 2, 
+            self.y_min + self.height / 2
+        ]
 
     def pixels(self, scale, size):
         return zip(*(
@@ -182,15 +232,11 @@ class Sign(namedtuple("Sign", ["visibility", "bbox", "type", "name"])):
             for j in range(round(self.x_min*scale), round(self.x_max*scale)+1)
             if i < round(size[0]*scale) and j < round(size[1]*scale)
         ))
-
-    def __lt__(self, other):
-        if not isinstance(other, Sign):
-            raise ValueError("Signs can only be compared to signs")
-
-        if self.visibility_index != other.visibility_index:
-            return self.visibility_index < other.visibility_index
-
-        return self.area > other.area
+    
+    def contains(self, another):
+        return (self.x_min <= another.x_min and self.y_min <= another.y_min
+                and self.x_min + self.width >= another.x_min + another.width
+                and self.y_min + self.height >= another.y_min + another.height)
 
 
 class STS:
@@ -240,7 +286,6 @@ class STS:
                 cls = self.CLASS_TO_IDX[obj[0].lower().strip()]
                 # print cls
 
-
                 #get coordinates
                 xmin = float(obj[4])
                 ymin = float(obj[5])
@@ -258,14 +303,16 @@ class STS:
 
 
                 #transform to  point + width and height representation
-                # x, y, w, h = bbox_transform_inv([xmin, ymin, xmax, ymax])
-                x, y, w, h = (xmin, ymin, xmax, ymax)
+                x, y, w, h = bbox_transform_inv(xmin, ymin, xmax, ymax)
 
                 annotations.append([x, y, w, h, cls])
 
             except:
                 continue
+        if len(annotations) == 0:
+            annotations.append([-1, -1, -1, -1, 0])
         return annotations
+
 
     def __len__(self):
         return len(self._data)
@@ -273,8 +320,12 @@ class STS:
     def __getitem__(self, i):
         return self._data[i]
 
-    
-
+def bbox_transform_inv(xmin, ymin, xmax, ymax):
+    x_min = int(round(xmin))
+    width = int(round(xmax)) - x_min
+    y_min = int(round(ymin))
+    height = int(round(ymax) - y_min)
+    return [x_min, y_min, width, height]
 
 class KittiData(Sequence):
     """Provide a Keras Sequence for the SpeedLimits dataset which is basically
@@ -288,8 +339,7 @@ class KittiData(Sequence):
         seed: int, The prng seed for the dataset
     """
     #LIMITS = ["50_SIGN", "70_SIGN", "80_SIGN"]
-    CLASSES = ['dontcare', 'car', 'van', 'truck',
-                     'pedestrian', 'cyclist']
+    CLASSES = ['empty', 'car', 'pedestrian', 'cyclist']
 
     def __init__(self, directory, split='train', sets=None):
         self.directory = directory
@@ -310,8 +360,12 @@ class KittiData(Sequence):
             #         filtered.append((image, 0))
             #     else:
             #         filtered.append((image, self.CLASSES.index(signs[0].name)))
-            categories = [a[-1] for a in annos]
-            filtered.append((image, categories[0]))
+            categories = []
+            for a in annos:
+                if a[-1] not in categories:
+                    categories.append(a[-1])
+            # categories = [a[-1] for a in annos]
+            filtered.append((image, categories))
         return filtered
 
     # def _acceptable(self, signs):
@@ -340,53 +394,11 @@ class KittiData(Sequence):
         data = imread(image)
         data = resize(data, (1242, 375))
         data = data.astype(np.float32) / np.float32(255.)
-        label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
-        # label = np.zeros(len(self.CLASSES), dtype=np.float32)
-        # for c in category:
-        #     label[c] = 1
+        # label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
+        label = np.zeros(len(self.CLASSES), dtype=np.float32)
+        for c in category:
+            label[c] = 1
         return data, label
-
-    def _load_annotation(gt_file):
-        with open(gt_file, 'r') as f:
-            lines = f.readlines()
-        f.close()
-
-        annotations = []
-
-        #each line is an annotation bounding box
-        for line in lines:
-            obj = line.strip().split(' ')
-
-            #get class, if class is not in listed, skip it
-            try:
-                cls = config.CLASS_TO_IDX[obj[0].lower().strip()]
-                # print cls
-
-
-                #get coordinates
-                xmin = float(obj[4])
-                ymin = float(obj[5])
-                xmax = float(obj[6])
-                ymax = float(obj[7])
-
-
-                #check for valid bounding boxes
-                assert xmin >= 0.0 and xmin <= xmax, \
-                    'Invalid bounding box x-coord xmin {} or xmax {} at {}' \
-                        .format(xmin, xmax, gt_file)
-                assert ymin >= 0.0 and ymin <= ymax, \
-                    'Invalid bounding box y-coord ymin {} or ymax {} at {}' \
-                        .format(ymin, ymax, gt_file)
-
-
-                #transform to  point + width and height representation
-                x, y, w, h = bbox_transform_inv([xmin, ymin, xmax, ymax])
-
-                annotations.append([x, y, w, h, cls])
-
-            except:
-                annotations.append([-1, -1, -1, -1, 0])
-        return annotations
 
     @property
     def image_size(self):
@@ -396,9 +408,14 @@ class KittiData(Sequence):
     def class_frequencies(self):
         """Compute and return the class specific frequencies."""
         freqs = np.zeros(len(self.CLASSES), dtype=np.float32)
+        all_sum = 0
         for image, category in self._data:
-            freqs[category] += 1
-        return freqs/len(self._data)
+            # freqs[category] += 1
+            all_sum += len(category)
+            for c in category:
+                freqs[c] += 1
+        return freqs/all_sum
+        # return freqs/len(self._data)
 
     def strided(self, N):
         """Extract N images almost in equal proportions from each category."""
@@ -409,7 +426,7 @@ class KittiData(Sequence):
         while len(idxs) < N:
             for i in order:
                 image, category = self._data[i]
-                if cat == category:
+                if cat in category:
                     idxs.append(i)
                     cat = (cat + 1) % len(self.CLASSES)
                 if len(idxs) >= N:

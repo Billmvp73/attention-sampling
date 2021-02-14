@@ -4,18 +4,7 @@
 # Written by Angelos Katharopoulos <angelos.katharopoulos@idiap.ch>
 #
 
-"""Download the Swedish Traffic Signs dataset and create the Speed Limit Signs
-dataset from and train with attention sampling.
-
-NOTE: Swedish Traffic Signs dataset is provided from
-      https://www.cvl.isy.liu.se/research/datasets/traffic-signs-dataset/ .
-"""
-
 import argparse
-from collections import namedtuple
-from functools import partial
-import hashlib
-import urllib.request
 import os
 from os import path
 import string
@@ -46,7 +35,7 @@ from tensorflow import ConfigProto
 from tensorflow import InteractiveSession
 from tensorflow.python import debug as tf_debug
 from keras.callbacks import TensorBoard
-from kitti_utils import STS, KittiData
+from bdd_utils import *
 
 config = ConfigProto()
 config.gpu_options.allow_growth = True
@@ -54,157 +43,6 @@ session = InteractiveSession(config=config)
 sess = K.get_session()
 sess = tf_debug.LocalCLIDebugWrapperSession(sess)
 K.set_session(sess)
-
-class AttentionSaver(Callback):
-    """Save the attention maps to monitor model evolution."""
-    def __init__(self, output_directory, att_model, training_set, period=1):
-        self._dir = path.join(output_directory, "attention")
-        try:
-            os.mkdir(self._dir)
-        except FileExistsError:
-            pass
-        self._att_model = att_model
-        idxs = training_set.strided(10)
-        data = [training_set[i] for i in idxs]
-        self._X = np.array([d[0] for d in data])
-        self._Y = np.array([d[1] for d in data]).argmax(axis=1)
-        np.savetxt(
-            path.join(self._dir, "points.txt"),
-            np.array([[i, yi] for i, yi in zip(idxs, self._Y)]).astype(int),
-            fmt="%d"
-        )
-        self.period = period
-        self.epoch_since_last_save = 0
-
-    def on_train_begin(self, *args):
-        _, _, x_low = self._att_model.predict(self._X)
-        for i, xi in enumerate(x_low):
-            self._imsave(path.join(self._dir, "{}.jpg").format(i), xi)
-
-    def on_epoch_end(self, e, logs):
-        self.epoch_since_last_save += 1
-        if self.epoch_since_last_save >= self.period:
-            self.epoch_since_last_save = 0
-            att, patches, _ = self._att_model.predict(self._X)
-            for i, att_i in enumerate(att):
-                np.save(path.join(self._dir, "att_{}_{}.npy").format(e, i), att_i)
-
-    def _imsave(self, filepath, x):
-        x = (x*255).astype(np.uint8)
-        imwrite(filepath, x)
-
-
-def resnet(x, strides=[1, 2, 2, 2], filters=[32, 32, 32, 32]):
-    """Implement a simple resnet."""
-    # Do a convolution on x
-    def c(x, filters, kernel, strides):
-        return Conv2D(filters, kernel_size=kernel, strides=strides,
-                      padding="same", use_bias=False)(x)
-
-    # Do a BatchNorm on x
-    def b(x):
-        return BatchNormalization()(x)
-
-    # Obviosuly just do relu
-    def relu(x):
-        return Activation("relu")(x)
-
-    # Implement a resnet block. short is True when we need to add a convolution
-    # for the shortcut
-    def block(x, filters, strides, short):
-        x = b(x)
-        x = relu(x)
-        x_short = x
-        if short:
-            x_short = c(x, filters, 1, strides)
-        x = c(x, filters, 3, strides)
-        x = b(x)
-        x = relu(x)
-        x = c(x, filters, 3, 1)
-        x = add([x, x_short])
-
-        return x
-
-    # Implement the resnet
-    stride_prev = strides.pop(0)
-    filters_prev = filters.pop(0)
-    y = c(x, filters_prev, 3, stride_prev)
-    for s, f in zip(strides, filters):
-        y = block(y, f, s, s != 1 or f != filters_prev)
-        stride_prev = s
-        filters_prev = f
-    y = b(y)
-    y = relu(y)
-
-    # Average the final features and normalize them
-    y = GlobalAveragePooling2D()(y)
-    y = L2Normalize()(y)
-
-    return y
-
-
-def attention(x):
-    params = dict(
-        activation="relu",
-        padding="valid",
-        kernel_regularizer=l2(1e-5)
-    )
-    x = Conv2D(8, kernel_size=3, **params)(x)
-    x = Conv2D(16, kernel_size=3, **params)(x)
-    x = Conv2D(32, kernel_size=3, **params)(x)
-    x = Conv2D(1, kernel_size=3)(x)
-    x = MaxPooling2D(pool_size=8)(x)
-    x = SampleSoftmax(squeeze_channels=True, smooth=1e-4)(x)
-
-    return x
-
-
-def get_model(outputs, width, height, scale, n_patches, patch_size, reg):
-    x_in = Input(shape=(height, width, 3))
-    x_high = ImageLinearTransform()(x_in)
-    x_high = ImagePan(horizontally=True, vertically=True)(x_high)
-    x_low = ResizeImages((int(height*scale), int(width*scale)))(x_high)
-
-    features, att, patches = attention_sampling(
-        attention,
-        resnet,
-        patch_size,
-        n_patches,
-        replace=False,
-        attention_regularizer=multinomial_entropy(reg),
-        receptive_field=9
-    )([x_low, x_high])
-    y = Dense(outputs, activation="softmax")(features)
-
-    return (
-        Model(inputs=x_in, outputs=[y]),
-        Model(inputs=x_in, outputs=[att, patches, x_low])
-    )
-
-
-def get_optimizer(args):
-    optimizer = args.optimizer
-
-    if optimizer == "sgd":
-        return SGD(lr=args.lr, momentum=args.momentum, clipnorm=args.clipnorm)
-    elif optimizer == "adam":
-        return Adam(lr=args.lr, clipnorm=args.clipnorm)
-
-    raise ValueError("Invalid optimizer {}".format(optimizer))
-
-
-def get_lr_schedule(args):
-    lr = args.lr
-    decrease_lr_at = args.decrease_lr_at
-
-    def get_lr(epoch):
-        if epoch < decrease_lr_at:
-            return lr
-        else:
-            return lr * 0.1
-
-    return get_lr
-
 
 def main(argv):
     parser = argparse.ArgumentParser(
@@ -322,12 +160,12 @@ def main(argv):
     # Load the data
     # training_set = SpeedLimits(args.dataset, train=True)
     # test_set = SpeedLimits(args.dataset, train=False)
-    kitti_data = [s.split(".")[0] for s in sorted(os.listdir(os.path.join(args.dataset, "training/image_2")))]
-    split_num = round(len(kitti_data) * args.split_percent / 100)
-    train_split = kitti_data[:split_num]
-    test_split = kitti_data[split_num:]
-    training_set = KittiData(args.dataset, 'train', train_split)
-    test_set = KittiData(args.dataset, "val", test_split)
+    # bdd_data = [s.split(".")[0] for s in sorted(os.listdir(os.path.join(args.dataset, "training/image_2")))]
+    # split_num = round(len(bdd_data) * args.split_percent / 100)
+    # train_split = bdd_data[:split_num]
+    # test_split = bdd_data[split_num:]
+    training_set = bddData(args.dataset, 'train')
+    test_set = bddData(args.dataset, "val")
 
     training_batched = Batcher(training_set, args.batch_size)
     test_batched = Batcher(test_set, args.batch_size)
