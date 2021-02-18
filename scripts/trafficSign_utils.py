@@ -10,7 +10,7 @@ import sys
 import zipfile
 import json
 import subprocess
-from cv2 import imread, imwrite, VideoCapture
+from cv2 import imread, imwrite, VideoCapture, resize
 import cv2
 import keras.backend as K
 from keras.callbacks import Callback, ModelCheckpoint, LearningRateScheduler
@@ -257,6 +257,7 @@ class trafficSignDataSet(Sequence):
     def __getitem__(self, i):
         image, category = self._data[i]
         data = imread(image)
+        data = resize(data, (1280, 960))
         data = data.astype(np.float32) / np.float32(255.)
         label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
         return data, label

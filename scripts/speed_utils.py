@@ -276,6 +276,10 @@ class SpeedLimits(Sequence):
                 if not signs:
                     filtered.append((image, 0))
                 else:
+                    # name = signs[0].name
+                    # for i in range(1, len(signs)):
+                    #     if name != signs[i].name:
+                    #         print("not all the same.")
                     filtered.append((image, self.CLASSES.index(signs[0].name)))
         return filtered
 
