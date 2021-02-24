@@ -6,3 +6,4 @@ dist
 *.so
 test_patch/*
 KITTI_weights/attention/*.jpg
+KITTI_weights_car/*

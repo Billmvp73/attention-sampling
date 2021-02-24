@@ -339,7 +339,9 @@ class KittiData(Sequence):
         seed: int, The prng seed for the dataset
     """
     #LIMITS = ["50_SIGN", "70_SIGN", "80_SIGN"]
-    CLASSES = ['empty', 'car', 'pedestrian', 'cyclist']
+    CLASSES = ['empty', 'car', 'pedestrian', 'cyclist', 'tram', 'person_sitting', 'misc', 'dontcare']
+    
+    # CLASSES = ['empty', 'car', 'pedestrian', 'cyclist']
 
     def __init__(self, directory, split='train', sets=None):
         self.directory = directory
@@ -364,8 +366,11 @@ class KittiData(Sequence):
             for a in annos:
                 if a[-1] not in categories:
                     categories.append(a[-1])
+            if self.CLASSES.index('car') not in categories:
+                categories = [0]
             # categories = [a[-1] for a in annos]
-            filtered.append((image, categories))
+            if len(categories) == 1:
+                filtered.append((image, categories))
         return filtered
 
     # def _acceptable(self, signs):
@@ -395,7 +400,7 @@ class KittiData(Sequence):
         data = resize(data, (1242, 375))
         data = data.astype(np.float32) / np.float32(255.)
         # label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
-        label = np.zeros(len(self.CLASSES), dtype=np.float32)
+        label = np.zeros(2, dtype=np.float32)
         for c in category:
             label[c] = 1
         return data, label
@@ -407,13 +412,14 @@ class KittiData(Sequence):
     @property
     def class_frequencies(self):
         """Compute and return the class specific frequencies."""
-        freqs = np.zeros(len(self.CLASSES), dtype=np.float32)
+        freqs = np.zeros(2, dtype=np.float32)
         all_sum = 0
         for image, category in self._data:
             # freqs[category] += 1
             all_sum += len(category)
             for c in category:
                 freqs[c] += 1
+        print("one-hot vector: ", freqs)
         return freqs/all_sum
         # return freqs/len(self._data)
 
@@ -428,7 +434,7 @@ class KittiData(Sequence):
                 image, category = self._data[i]
                 if cat in category:
                     idxs.append(i)
-                    cat = (cat + 1) % len(self.CLASSES)
+                    cat = (cat + 1) % 2
                 if len(idxs) >= N:
                     break
         return idxs
