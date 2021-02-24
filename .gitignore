@@ -7,3 +7,5 @@ dist
 test_patch/*
 KITTI_weights/attention/*.jpg
 KITTI_weights_car/*
+speed_limits_dataset/*
+KITTI_weights/attention/*.jpg
