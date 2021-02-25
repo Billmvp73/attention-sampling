@@ -59,7 +59,7 @@ class SamplePatches(Layer):
 
         # samples shape
         samples_shape = (shape_att[0], self._n_patches, shape_att[1:][0])
-        return [patches_shape, att_shape, samples_shape]
+        return [patches_shape, att_shape, samples_shape, samples_shape]
 
     def call(self, x):
         x_low, x_high, attention = x
@@ -90,7 +90,7 @@ class SamplePatches(Layer):
             1
         )
 
-        return [patches, sampled_attention, offsets]
+        return [patches, sampled_attention, offsets, samples]
 
 
 class Expectation(Layer):
@@ -178,7 +178,7 @@ def attention_sampling(attention, feature, patch_size=None, n_patches=10,
                 ActivityRegularizer(attention_regularizer)(attention_map)
 
         # Then we sample patches based on the attention
-        patches, sampled_attention, samples = SamplePatches(
+        patches, sampled_attention, offsets, samples = SamplePatches(
             n_patches,
             patch_size,
             receptive_field,
