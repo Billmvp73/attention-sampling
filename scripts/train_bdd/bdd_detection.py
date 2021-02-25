@@ -84,8 +84,8 @@ def main(argv):
     )
     parser.add_argument(
         "--decrease_lr_at",
-        type=float,
-        default=250,
+        type=lambda x: [int(xi) for xi in x.split(',')],
+        default="250,500,750",
         help="Decrease the learning rate in this epoch"
     )
 
@@ -156,7 +156,12 @@ def main(argv):
     )
 
     args = parser.parse_args(argv)
-
+    folder = ""
+    for d_epoch in args.decrease_lr_at:
+        folder += "_" + str(d_epoch)
+    args.output = path.join(args.output, folder + "0.3")
+    if not os.path.exists(args.output):
+        os.mkdir(args.output)
     # Load the data
     # training_set = SpeedLimits(args.dataset, train=True)
     # test_set = SpeedLimits(args.dataset, train=False)

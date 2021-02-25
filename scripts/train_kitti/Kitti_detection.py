@@ -156,7 +156,8 @@ def main(argv):
     )
 
     args = parser.parse_args(argv)
-
+    if not os.path.exists(args.output):
+        os.mkdir(args.output)
     # Load the data
     # training_set = SpeedLimits(args.dataset, train=True)
     # test_set = SpeedLimits(args.dataset, train=False)
@@ -173,6 +174,7 @@ def main(argv):
     # Create the models
     H, W = training_set.image_size
     class_weights = training_set.class_frequencies
+    test_set.class_frequencies
     class_weights = (1./len(class_weights)) / class_weights
     model, att_model = get_model(
         len(class_weights),

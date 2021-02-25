@@ -176,10 +176,19 @@ def get_lr_schedule(args):
     decrease_lr_at = args.decrease_lr_at
 
     def get_lr(epoch):
-        if epoch < decrease_lr_at:
-            return lr
-        else:
-            return lr * 0.1
+        # decrease_lr_at.append(args.epochs)
+        scale = 1
+        for i, d_epoch in enumerate(decrease_lr_at):
+            if epoch > d_epoch:
+                scale *= 0.3
+            else:
+                break
+        return lr * scale
+        # for d_epoch in decrease_lr_at
+        # if epoch < decrease_lr_at:
+        #     return lr
+        # else:
+        #     return lr * 0.1
 
     return get_lr
 
@@ -243,12 +252,13 @@ class CropObj(namedtuple("CropObj", ["bbox", "name"])):
 class STS:
     """The STS class reads the annotations and creates the corresponding
     Sign objects."""
-    def __init__(self, directory, CLASSES, annotations=None):
+    def __init__(self, directory, CLASSES_TO_IDX, annotations=None):
 
         self._directory = directory
-        self.CLASSES = CLASSES
-        self.CLASSES_LEN = len(self.CLASSES)
-        self.CLASS_TO_IDX = dict(zip(self.CLASSES, range(self.CLASSES_LEN)))
+        # self.CLASSES = CLASSES
+        # self.CLASSES_LEN = len(self.CLASSES)
+        # self.CLASS_TO_IDX = dict(zip(self.CLASSES, range(self.CLASSES_LEN)))
+        self.CLASSES_TO_IDX = CLASSES_TO_IDX
         self.annotations = annotations
         self._data = self._load_files()
 
@@ -264,12 +274,12 @@ class STS:
             img_labels = anno["labels"]
             target_anno = []
             for img_label in img_labels:
-                if img_label["category"] not in self.CLASSES:
+                if img_label["category"] not in self.CLASSES_TO_IDX:
                     continue
                 attributes = img_label["attributes"]
                 if not attributes["occluded"] and not attributes["truncated"]:
                     box2d = img_label["box2d"]
-                    target_anno.append([float(box2d["x1"]), float(box2d["y1"]), float(box2d["x2"]), float(box2d["y2"]), self.CLASS_TO_IDX[img_label["category"]]])
+                    target_anno.append([float(box2d["x1"]), float(box2d["y1"]), float(box2d["x2"]), float(box2d["y2"]), self.CLASSES_TO_IDX[img_label["category"]]])
             if len(target_anno) == 0:
                 target_anno.append([-1, -1, -1, -1, 0])
             final_annotations.append(target_anno)
@@ -300,9 +310,23 @@ class bddData(Sequence):
         seed: int, The prng seed for the dataset
     """
     #LIMITS = ["50_SIGN", "70_SIGN", "80_SIGN"]
-    CLASSES = ['empty', "bike", "bus", "car", "motor", "person", "rider", "truck"]
+    # CLASSES = ['empty', "bike", "bus", "car", "motor", "person", "rider", "truck"]
+    CLASSES_TO_IDX = {
+        "empty": 0,
+        "car": 1,
+        "bus": 1,
+        "truck": 1,
+        "train": 1,
+        "bike": 2,
+        "person": 2,
+        "rider": 2,
+        "motor": 2,
+        "traffic light": 3,
+        "traffic sign": 3
+    }
+    CLASSES = [0, 1]
 
-    def __init__(self, directory, split='train'):
+    def __init__(self, directory, split='train', objects=None):
         self.directory = directory
         # if split == 'train' or split == 'val':
         #     self.directory = os.path.join(self.directory, "training")
@@ -310,13 +334,14 @@ class bddData(Sequence):
         #     self.directory = os.path.join(self.directory, "testing")
         self.split = split
         self.anno_path = None
+        self.objects = objects
         if self.split == "train" or self.split == "val":
             self.anno_path = os.path.join(self.directory, "bdd100k_labels_images_{}.json".format(split))
         self.directory = os.path.join(self.directory, split)
-        self._data = self._filter(STS(self.directory, self.CLASSES, self.anno_path))
+        self._data = self._filter(STS(self.directory, self.CLASSES_TO_IDX, self.anno_path), self.objects)
 
 
-    def _filter(self, data):
+    def _filter(self, data, objects):
         filtered = []
         for image, annos in data:
             # signs, acceptable = self._acceptable(signs)
@@ -325,12 +350,18 @@ class bddData(Sequence):
             #         filtered.append((image, 0))
             #     else:
             #         filtered.append((image, self.CLASSES.index(signs[0].name)))
-            categories = []
-            for a in annos:
-                if a[-1] not in categories:
-                    categories.append(a[-1])
-            # categories = [a[-1] for a in annos]
-            filtered.append((image, categories))
+            if objects is None:
+                categories = []
+                for a in annos:
+                    if a[-1] not in categories:
+                        categories.append(a[-1])
+                if self.CLASSES_TO_IDX["car"] not in categories:
+                    categories = [0]
+                if len(categories) == 1:
+                # categories = [a[-1] for a in annos]
+                    filtered.append((image, categories))
+            else:
+                filtered.append((image, annos))
         return filtered
 
     # def _acceptable(self, signs):
@@ -357,13 +388,16 @@ class bddData(Sequence):
     def __getitem__(self, i):
         image, category = self._data[i]
         data = imread(image)
-        data = resize(data, (1242, 375))
+        # data = resize(data, (1242, 375))
         data = data.astype(np.float32) / np.float32(255.)
         # label = np.eye(len(self.CLASSES), dtype=np.float32)[category]
-        label = np.zeros(len(self.CLASSES), dtype=np.float32)
-        for c in category:
-            label[c] = 1
-        return data, label
+        if self.objects is None:
+            label = np.zeros(len(self.CLASSES), dtype=np.float32)
+            for c in category:
+                label[c] = 1
+            return data, label
+        else:
+            return data, np.array(category)
 
     @property
     def image_size(self):
@@ -379,6 +413,9 @@ class bddData(Sequence):
             all_sum += len(category)
             for c in category:
                 freqs[c] += 1
+        print("one-hot vector: ", freqs)
+        if self.objects is not None:
+            return freqs
         return freqs/all_sum
         # return freqs/len(self._data)
 

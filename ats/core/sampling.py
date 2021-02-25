@@ -7,7 +7,7 @@
 tensor."""
 
 from keras import backend as K
-
+import tensorflow as tf
 
 def _sample_with_replacement(logits, n_samples):
     """Sample with replacement using the tensorflow op."""
@@ -16,6 +16,8 @@ def _sample_with_replacement(logits, n_samples):
     else:
         return K.tf.multinomial(logits, n_samples, output_dtype="int32")
 
+def _sample_top_n(logits, n_samples):
+    return K.tf.nn.top_k(logits, k=n_samples)[1]
 
 def _sample_without_replacement(logits, n_samples):
     """Sample without replacement using the Gumbel-max trick.
@@ -47,11 +49,15 @@ def sample(n_samples, attention, sample_space, replace=False,
         _sample_with_replacement if replace
         else _sample_without_replacement
     )
-
+    # sampling_function = _sample_top_n
+    # n_samples = n_samples + 1
     # Flatten the attention distribution and sample from it
     logits = K.reshape(logits, (-1, K.prod(sample_space)))
     samples = sampling_function(logits, n_samples)
-
+    # logits = K.print_tensor(logits, message="Value of logits")
+    # samples = K.print_tensor(samples, message="Value of samples")
+    # tf.print("logits shape: ", logits.shape)
+    # tf.print("samples shape: ", samples.shape)
     # Unravel the indices into sample_space
     batch_size = K.shape(attention)[0]
     n_dims = K.shape(sample_space)[0]

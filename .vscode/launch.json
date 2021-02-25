@@ -15,6 +15,8 @@
             // "args": [ "/home/pyhuang/UM/saliency_2021/traffic_sign/RoadText1k", "/home/pyhuang/UM/saliency_2021/traffic_sign/RoadText1k", "--lr","0.001", "--optimizer", "sgd", "--epochs", "200", "--decrease_lr_at", "100", "--resume", "True", "--load_epoch", "40", "--load_dir", "~/UM/saliency_2021/traffic_sign/RoadText1k_weights/weights", "--batch_size", "32"]
             // "args": [ "/home/pyhuang/UM/saliency_2021/vehicle/KITTI/data_object_image", "/home/pyhuang/UM/attention/attention-sampling/KITTI_weights", "--optimizer", "adam", "--epochs", "1000"]
             "args": [ "/home/sc/Documents/scene-cache/data/bdd100k", "/home/sc/Documents/scene-cache/data/bdd100k", "--optimizer", "adam", "--epochs", "1000"]
+            // "args": [ "/home/pyhuang/UM/saliency_2021/vehicle/KITTI/data_object_image", "/home/pyhuang/UM/attention/attention-sampling/KITTI_weights_car", "--optimizer", "adam", "--epochs", "1000"]
+            // "args": [ "/home/pyhuang/UM/data/BerkelyDeepDrive/bdd100k", "/home/pyhuang/UM/data/BerkelyDeepDrive/bdd100k/ats_keras_one_hot", "--optimizer", "adam", "--epochs", "500"]
         }
     ]
 }
