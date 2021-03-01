@@ -159,7 +159,7 @@ def main(argv):
     folder = ""
     for d_epoch in args.decrease_lr_at:
         folder += "_" + str(d_epoch)
-    args.output = path.join(args.output, folder + "0.3_" + str(args.n_patches))
+    args.output = path.join(args.output, folder + "s0.3_n" + str(args.n_patches)+"_p" + str(args.patch_size)+"_b" + str(args.batch_size))
     print("Output Directory: %s" % args.output)
     if not os.path.exists(args.output):
         os.mkdir(args.output)
