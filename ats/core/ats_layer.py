@@ -180,7 +180,7 @@ def attention_sampling(attention, feature, patch_size=None, n_patches=10,
                 ActivityRegularizer(attention_regularizer)(attention_map)
 
         # Then we sample patches based on the attention
-        patches, sampled_attention, samples = SamplePatches(
+        patches, sampled_attention, offsets, samples = SamplePatches(
         # patches, sampled_attention, offsets, samples = SamplePatches(
             n_patches,
             patch_size,
