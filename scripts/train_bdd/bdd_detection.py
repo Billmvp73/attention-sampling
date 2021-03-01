@@ -159,7 +159,8 @@ def main(argv):
     folder = ""
     for d_epoch in args.decrease_lr_at:
         folder += "_" + str(d_epoch)
-    args.output = path.join(args.output, folder + "0.3")
+    args.output = path.join(args.output, folder + "0.3_" + str(args.n_patches))
+    print("Output Directory: %s" % args.output)
     if not os.path.exists(args.output):
         os.mkdir(args.output)
     # Load the data
