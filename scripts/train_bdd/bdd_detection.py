@@ -187,6 +187,7 @@ def main(argv):
         args.patch_size,
         args.regularizer_strength
     )
+    print(model.summary())
     model.compile(
         loss="categorical_crossentropy",
         optimizer=get_optimizer(args),

@@ -19,6 +19,7 @@ from keras.optimizers import SGD, Adam
 from keras.regularizers import l2
 from keras.utils import Sequence, plot_model
 import numpy as np
+import random
 
 from ats.core import attention_sampling
 from ats.utils.layers import L2Normalize, ResizeImages, SampleSoftmax,     ImageLinearTransform, ImagePan
@@ -55,6 +56,7 @@ def neighPatches(samples, patch_size, image):
 
 
 # %%
+f_s = random.sample(range(3174), 20)
 path = '/home/pyhuang/UM/data/kitti/image_0/'
 f = 420
 input_image = imread(path + str(f).zfill(15) + '.jpg')
@@ -95,7 +97,7 @@ opts = options(
     regularizers_strength = 0.0001,
     load_dir = "/home/pyhuang/UM/attention/kitti_detection/",
     resume = True,
-    load_epoch = 203,
+    load_epoch = 500,
     batch_size = 32,
     epochs = 500,
     momentum = 0.9,
@@ -249,9 +251,9 @@ while f < 430:
     input_image = np.expand_dims(input_image, axis=0)
     low, patches, sampled_attention, samples, ats_map, p_features, expected, y_pred = ats_model.predict(input_image)
     crops = []
-    print(samples.shape)
+    # print(samples.shape)
     for sample in samples[0]:
-        print(sample)
+        # print(sample)
         cropped = neighPatches(sample, opts.patch_size, input_image[0])
         crops.append(cropped)
     show_patches(np.array(crops), (2, 3))
@@ -262,3 +264,5 @@ while f < 430:
     f += 1
 
 
+
+# %%
