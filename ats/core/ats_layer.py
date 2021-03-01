@@ -59,11 +59,7 @@ class SamplePatches(Layer):
 
         # samples shape
         samples_shape = (shape_att[0], self._n_patches, shape_att[1:][0])
-<<<<<<< HEAD
         return [patches_shape, att_shape, samples_shape]
-=======
-        return [patches_shape, att_shape, samples_shape, samples_shape]
->>>>>>> 9f2e85c5ce866b96a5bf8473b22b860a611e0a59
         # return [patches_shape, att_shape, samples_shape, samples_shape]
 
     def call(self, x):
@@ -95,11 +91,7 @@ class SamplePatches(Layer):
             1
         )
 
-<<<<<<< HEAD
         return [patches, sampled_attention, samples]
-=======
-        return [patches, sampled_attention, offsets, samples]
->>>>>>> 9f2e85c5ce866b96a5bf8473b22b860a611e0a59
         # return [patches, sampled_attention, offsets, samples]
 
 
