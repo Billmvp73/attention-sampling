@@ -37,6 +37,11 @@ from tensorflow.python import debug as tf_debug
 from keras.callbacks import TensorBoard
 from bdd_utils import *
 
+from keras import applications
+from keras.applications.resnet50 import ResNet50
+from keras.preprocessing import image
+from keras.applications.resnet50 import preprocess_input
+
 config = ConfigProto()
 config.gpu_options.allow_growth = True
 session = InteractiveSession(config=config)
@@ -159,7 +164,11 @@ def main(argv):
     folder = ""
     for d_epoch in args.decrease_lr_at:
         folder += "_" + str(d_epoch)
-    args.output = path.join(args.output, folder + "0.3")
+    old_output = args.output
+    args.output = path.join(args.output, folder + "s0.3_n" + str(args.n_patches)+"_p" + str(args.patch_size[0])+str(args.patch_size[1])+"_b" + str(args.batch_size))
+    print("Output Directory: %s" % args.output)
+    if not os.path.exists(args.output):
+        os.mkdir(args.output)
     if not os.path.exists(args.output):
         os.mkdir(args.output)
     # Load the data
@@ -179,22 +188,33 @@ def main(argv):
     H, W = training_set.image_size
     class_weights = training_set.class_frequencies
     class_weights = (1./len(class_weights)) / class_weights
+    resnet50 = ResNet50(weights="imagenet", include_top=False)
+    top = GlobalAveragePooling2D()(resnet50.output)
+    top = L2Normalize()(top)
+    resnet = Model(input=resnet50.input, output=top)
+    for layer in resnet50.layers:
+        layer.trainable = False
     model, att_model = get_model(
-        len(class_weights),
+        len(class_weights), resnet,
         W, H,
         args.scale,
         args.n_patches,
         args.patch_size,
         args.regularizer_strength
     )
+    print(model.summary())
     model.compile(
         loss="categorical_crossentropy",
         optimizer=get_optimizer(args),
         metrics=["accuracy", "categorical_crossentropy"]
     )
     if args.resume:
-        load_path = os.path.join(args.load_dir, "weights."+ str(args.load_epoch) + ".h5")
+        if args.load_dir == old_output:
+            args.load_dir = args.output
+        load_path = os.path.join(args.load_dir, "weights.{:02d}.h5".format(args.load_epoch))
+        
         model.load_weights(load_path)
+        print("successfully load ", load_path)
 
 
     plot_model(model, to_file=path.join(args.output, "model.png"))
