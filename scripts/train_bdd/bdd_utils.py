@@ -73,53 +73,53 @@ class AttentionSaver(Callback):
         imwrite(filepath, x)
 
 
-def resnet(x, strides=[1, 2, 2, 2], filters=[32, 32, 32, 32]):
-    """Implement a simple resnet."""
-    # Do a convolution on x
-    def c(x, filters, kernel, strides):
-        return Conv2D(filters, kernel_size=kernel, strides=strides,
-                      padding="same", use_bias=False)(x)
+# def resnet(x, strides=[1, 2, 2, 2], filters=[32, 32, 32, 32]):
+#     """Implement a simple resnet."""
+#     # Do a convolution on x
+#     def c(x, filters, kernel, strides):
+#         return Conv2D(filters, kernel_size=kernel, strides=strides,
+#                       padding="same", use_bias=False)(x)
 
-    # Do a BatchNorm on x
-    def b(x):
-        return BatchNormalization()(x)
+#     # Do a BatchNorm on x
+#     def b(x):
+#         return BatchNormalization()(x)
 
-    # Obviosuly just do relu
-    def relu(x):
-        return Activation("relu")(x)
+#     # Obviosuly just do relu
+#     def relu(x):
+#         return Activation("relu")(x)
 
-    # Implement a resnet block. short is True when we need to add a convolution
-    # for the shortcut
-    def block(x, filters, strides, short):
-        x = b(x)
-        x = relu(x)
-        x_short = x
-        if short:
-            x_short = c(x, filters, 1, strides)
-        x = c(x, filters, 3, strides)
-        x = b(x)
-        x = relu(x)
-        x = c(x, filters, 3, 1)
-        x = add([x, x_short])
+#     # Implement a resnet block. short is True when we need to add a convolution
+#     # for the shortcut
+#     def block(x, filters, strides, short):
+#         x = b(x)
+#         x = relu(x)
+#         x_short = x
+#         if short:
+#             x_short = c(x, filters, 1, strides)
+#         x = c(x, filters, 3, strides)
+#         x = b(x)
+#         x = relu(x)
+#         x = c(x, filters, 3, 1)
+#         x = add([x, x_short])
 
-        return x
+#         return x
 
-    # Implement the resnet
-    stride_prev = strides.pop(0)
-    filters_prev = filters.pop(0)
-    y = c(x, filters_prev, 3, stride_prev)
-    for s, f in zip(strides, filters):
-        y = block(y, f, s, s != 1 or f != filters_prev)
-        stride_prev = s
-        filters_prev = f
-    y = b(y)
-    y = relu(y)
+#     # Implement the resnet
+#     stride_prev = strides.pop(0)
+#     filters_prev = filters.pop(0)
+#     y = c(x, filters_prev, 3, stride_prev)
+#     for s, f in zip(strides, filters):
+#         y = block(y, f, s, s != 1 or f != filters_prev)
+#         stride_prev = s
+#         filters_prev = f
+#     y = b(y)
+#     y = relu(y)
 
-    # Average the final features and normalize them
-    y = GlobalAveragePooling2D()(y)
-    y = L2Normalize()(y)
+#     # Average the final features and normalize them
+#     y = GlobalAveragePooling2D()(y)
+#     y = L2Normalize()(y)
 
-    return y
+#     return y
 
 
 def attention(x):
@@ -138,7 +138,7 @@ def attention(x):
     return x
 
 
-def get_model(outputs, width, height, scale, n_patches, patch_size, reg):
+def get_model(outputs,resnet, width, height, scale, n_patches, patch_size, reg):
     x_in = Input(shape=(height, width, 3))
     x_high = ImageLinearTransform()(x_in)
     x_high = ImagePan(horizontally=True, vertically=True)(x_high)
