@@ -71,8 +71,8 @@ def sample(n_samples, attention, sample_space, replace=False,
         K.tf.ones((1, n_samples, 1), dtype="int32")
     )
     indices = K.concatenate([batch_indices, samples], -1)
-
+    tf.print("indices shape ", indices.shape)
     # Gather the attention
     sampled_attention = K.tf.gather_nd(attention, indices)
 
-    return samples, sampled_attention
+    return samples, sampled_attention, indices

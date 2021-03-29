@@ -3,5 +3,5 @@
 # Written by Angelos Katharopoulos <angelos.katharopoulos@idiap.ch>
 #
 
-from .ats_layer import SamplePatches, Expectation, attention_sampling
+from .ats_layer import SamplePatches, Expectation, attention_sampling, multi_attention_sampling
 from .sampling import sample
