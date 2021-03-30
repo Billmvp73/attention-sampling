@@ -201,6 +201,13 @@ def attention_sampling(attention, feature, patch_size=None, n_patches=10,
             sampled_attention
         ])
 
+        # for one point, a patch for high resolution (100, 100), a patch for down-4 resolution (100,100)
+        # ats (the total sum is 1.)
+
+        # two ats
+        # a: H, L : -> aH, aL -> aH -> gH
+        # b: 
+
         return [sample_features, attention_map, patches]
 
     return apply_ats
