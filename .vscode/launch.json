@@ -11,8 +11,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             // "args": [ "/home/pyhuang/UM/attention/speed_limits_example", "/home/pyhuang/UM/attention/speed_limits_example", "--optimizer", "adam", "--epochs", "1000", "--resume", "True", "--load_epoch", "1000", "--load_dir", "/home/pyhuang/UM/attention/attention_sampling_keras", "--batch_size", "1"]
-            "args": [ "/home/sc/Documents/scene-cache/data/bdd100k", "/home/sc/Documents/scene-cache/data/bdd100k", "--optimizer", "adam", "--epochs", "500", "--n_patches", "5", "--patch_size", "300x300", "--batch_size", "4", "--resume", "False", "--load_epoch", "11", "--load_dir", "/home/sc/Documents/scene-cache/data/bdd100k"]
-            // "args": [ "/media/pyhuang/E/BerkelyDeepDrive/bdd100k", "/media/pyhuang/E/BerkelyDeepDrive/bdd100k", "--optimizer", "adam", "--epochs", "500", "--n_patches", "5", "--patch_size", "300x300", "--batch_size", "4", "--resume", "True", "--load_epoch", "11", "--load_dir", "/media/pyhuang/E/BerkelyDeepDrive/bdd100k"]
+            // "args": [ "/home/sc/Documents/scene-cache/data/bdd100k", "/home/sc/Documents/scene-cache/data/bdd100k", "--optimizer", "adam", "--epochs", "500", "--n_patches", "5", "--patch_size", "300x300", "--batch_size", "4", "--resume", "False", "--load_epoch", "11", "--load_dir", "/home/sc/Documents/scene-cache/data/bdd100k"]
+            "args": [ "/media/pyhuang/E/BerkelyDeepDrive/bdd100k", "/media/pyhuang/E/BerkelyDeepDrive/bdd100k", "--optimizer", "adam", "--epochs", "500", "--n_patches", "5", "--patch_size", "300x300", "--batch_size", "4", "--resume", "True", "--load_epoch", "11", "--load_dir", "/media/pyhuang/E/BerkelyDeepDrive/bdd100k"]
             // "args": [ "/home/pyhuang/UM/saliency_2021/vehicle/KITTI/data_object_image", "/home/pyhuang/UM/attention/attention-sampling/KITTI_weights", "--optimizer", "adam", "--epochs", "1000"]
             // "args": [ "/home/sc/Documents/scene-cache/data/bdd100k", "/home/sc/Documents/scene-cache/data/bdd100k", "--optimizer", "adam", "--epochs", "1000"]
         }

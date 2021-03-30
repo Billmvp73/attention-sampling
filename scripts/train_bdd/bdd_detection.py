@@ -188,14 +188,22 @@ def main(argv):
     H, W = training_set.image_size
     class_weights = training_set.class_frequencies
     class_weights = (1./len(class_weights)) / class_weights
-    resnet50 = ResNet50(weights="imagenet", include_top=False)
-    top = GlobalAveragePooling2D()(resnet50.output)
-    top = L2Normalize()(top)
-    resnet = Model(input=resnet50.input, output=top)
-    for layer in resnet50.layers:
-        layer.trainable = False
-    model, att_model = get_model(
-        len(class_weights), resnet,
+    # resnet50 = ResNet50(weights="imagenet", include_top=False)
+    # top = GlobalAveragePooling2D()(resnet50.output)
+    # top = L2Normalize()(top)
+    # resnet = Model(input=resnet50.input, output=top)
+    # for layer in resnet50.layers:
+    #     layer.trainable = False
+    # model, att_model = get_model(
+    #     len(class_weights),
+    #     W, H,
+    #     args.scale,
+    #     args.n_patches,
+    #     args.patch_size,
+    #     args.regularizer_strength
+    # )
+    model, att_model = get_multi_model(
+        len(class_weights), [1, 2, 4],
         W, H,
         args.scale,
         args.n_patches,
